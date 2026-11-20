@@ -5,7 +5,7 @@
  * (HTML만 새로 받고 JS/CSS는 옛 캐시로 쓰면 화면이 깨지기 때문 — 버전을 올려도
  *  새 워커가 활성화되기 전 첫 방문에서 그런 어긋남이 생긴다.)
  */
-var VERSION = 'neis-archive-v3';
+var VERSION = 'neis-archive-v4';
 var SHELL = [
   './',
   './index.html',
@@ -38,7 +38,9 @@ self.addEventListener('fetch', function (e) {
   var url = new URL(req.url);
   if (url.origin !== location.origin) return;             // 외부 요청은 손대지 않음
 
-  var net = fetch(req).then(function (res) {
+  /* no-cache: GitHub Pages 의 10분 HTTP 캐시에 옛 JS/CSS 가 남아
+     새 HTML과 어긋나는 것을 막는다. 서버가 그대로면 304로 끝난다. */
+  var net = fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then(function (res) {
     if (res && res.ok && res.type === 'basic') {
       var copy = res.clone();
       caches.open(VERSION).then(function (c) { c.put(req, copy); }).catch(function () {});
