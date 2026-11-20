@@ -9,7 +9,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="styles.css?v=7">
+<link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
 
@@ -53,19 +53,24 @@
 
   <div id="content" hidden>
 
-    <!-- 이달의 흐름 + 지뢰 -->
-    <section class="pb" id="playbook" aria-live="polite"></section>
-
-    <!-- 검색 · 필터 -->
+    <!-- 검색 · 필터 (월 스트립 바로 아래 고정) -->
     <section class="deckbar" id="deckbar">
-      <div class="searchrow">
-        <span class="sic" aria-hidden="true">⌕</span>
-        <input type="search" id="q" placeholder="검색 — 반변경, 학기말종합의견, 주소연계, 정정대장…" autocomplete="off" aria-label="검색">
-        <button class="qclear" type="button" id="btnClearQ" hidden aria-label="검색 지우기">✕</button>
+      <div class="barrow">
+        <div class="searchrow">
+          <span class="sic" aria-hidden="true">⌕</span>
+          <input type="search" id="q" placeholder="검색 — 메뉴명, 증상, 오류 문구로 찾기" autocomplete="off" aria-label="검색">
+          <button class="qclear" type="button" id="btnClearQ" hidden aria-label="검색 지우기">✕</button>
+        </div>
+        <div class="jumprow" id="jumpRow" role="group" aria-label="바로 가기">
+          <button class="jbtn" type="button" data-go="playbook">업무흐름</button>
+          <button class="jbtn" type="button" data-go="mines">지뢰</button>
+          <button class="jbtn" type="button" data-go="cards">카드</button>
+        </div>
       </div>
       <div class="chips" id="chips" role="group" aria-label="필터"></div>
       <div class="deckfoot">
         <span class="count" id="countTxt"></span>
+        <span class="bstate" id="barState"></span>
         <label class="sortwrap">정렬
           <select id="sortSel">
             <option value="sev">중요도순</option>
@@ -75,6 +80,9 @@
         </label>
       </div>
     </section>
+
+    <!-- 이달의 흐름 + 지뢰 -->
+    <section class="pb" id="playbook" aria-live="polite"></section>
 
     <div id="cards" class="cards"></div>
     <section id="searchPanel" hidden></section>
@@ -138,7 +146,7 @@
   </form>
 </dialog>
 
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 <script>
 /* 새 껍데기를 받는 중(옛 app.js가 돌고 있는 짧은 순간)이면 안내만 띄운다. 데이터와는 무관. */
 setTimeout(function () {

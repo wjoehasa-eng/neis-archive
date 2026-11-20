@@ -8,7 +8,7 @@
 (function () {
   'use strict';
 
-  var LS_URL = 'na.bridge', LS_KEY = 'na.key', LS_SYNC = 'na.lastSyncMeta';
+  var LS_URL = 'na.bridge', LS_KEY = 'na.key', LS_SYNC = 'na.lastSyncMeta', LS_PBFOLD = 'na.pbFold';
   var DB_NAME = 'neis-archive', STORE = 'kv', REC = 'archive';
   var AUTO_MS = 30 * 60 * 1000;           // 30분 지나면 조용히 새로 받기
   var MAX_KB = 60 * 1024;                 // 받는 파일 상한(60MB)
@@ -22,7 +22,7 @@
   var lastMeta = null, syncing = false;
 
   window.__naErrors = [];
-  window.__naVersion = '2026-11-20.7';
+  window.__naVersion = '2026-11-20.8';
   window.addEventListener('error', function (e) { window.__naErrors.push(String((e && e.message) || e)); });
   window.addEventListener('unhandledrejection', function (e) {
     var r = e && e.reason; window.__naErrors.push('promise: ' + String((r && r.message) || r));
@@ -47,6 +47,14 @@
     return s.length > n ? s.slice(0, n).replace(/[ ,·]$/, '') + '…' : s;
   }
   function mLabel(m) { return m && m.length >= 7 ? (+m.slice(5)) + '월' : ''; }
+  function pathText(mp) {
+    var segs = String(mp || '').match(/\[([^\]]+)\]/g) || [];
+    segs = segs.map(function (s) { return s.slice(1, -1).replace(/\s+/g, ' ').trim(); });
+    var out = [];
+    segs.forEach(function (s) { if (out[out.length - 1] !== s) out.push(s); });
+    return out.join(' › ');
+  }
+  function pbFolded() { return lsGet(LS_PBFOLD) === '1'; }
   function toast(msg, isErr) {
     var t = $('#toast');
     t.textContent = msg; t.hidden = false;
@@ -177,10 +185,16 @@
 
   /* ── 셸(정적 영역) ────────────────────────────────────── */
   function syncTopbarHeight() {
-    var tb = $('.topbar');
-    if (!tb) return;
-    var h = Math.round(tb.getBoundingClientRect().height);
-    document.documentElement.style.setProperty('--tb-h', h + 'px');
+    var root = document.documentElement.style;
+    var h = function (sel) { var el = $(sel); return el ? Math.round(el.getBoundingClientRect().height) : 0; };
+    root.setProperty('--tb-h', h('.topbar') + 'px');
+    root.setProperty('--ms-h', h('#mstrip') + 'px');
+    root.setProperty('--dk-h', h('#deckbar') + 'px');
+  }
+  function barPad() {
+    var cs = window.getComputedStyle(document.documentElement);
+    var v = function (k) { return parseFloat(cs.getPropertyValue(k)) || 0; };
+    return v('--tb-h') + v('--ms-h') + v('--dk-h') + 10;
   }
 
   function renderShell() {
@@ -192,25 +206,40 @@
     renderFooter();
   }
 
+  /* 월 스트립 숫자는 ‘대표 카드 수’로 통일(원문 글 수는 월 헤더 부제목과 툴팁에만). */
   function renderMonths() {
     var counts = Object.create(null);
     CARDS.forEach(function (c) { counts[c.a.m] = (counts[c.a.m] || 0) + 1; });
     var arts = DATA.month_counts || {};
+    var cmts = DATA.month_comments || {};
     var html = ['<div class="mstrip-in">'];
-    html.push('<button class="mbtn all' + (S.month === 'all' ? ' on' : '') + '" type="button" data-m="all">' +
+    html.push('<button class="mbtn all' + (S.month === 'all' ? ' on' : '') + '" type="button" data-m="all"' +
+      ' title="전체 카드 ' + CARDS.length + '장 · 원문 ' + num(DATA.articles.length) + '건">' +
       '<b>전체</b><span>' + CARDS.length + '</span></button>');
     MONTHS.forEach(function (m) {
       html.push('<button class="mbtn' + (S.month === m ? ' on' : '') + '" type="button" data-m="' + m + '"' +
-        ' title="' + m.slice(5) + '월 글 ' + num(arts[m] || 0) + '건 · 카드 ' + (counts[m] || 0) + '장">' +
-        '<b>' + (+m.slice(5)) + '월</b><span>' + num(arts[m] || 0) + '</span></button>');
+        ' title="' + m.slice(5) + '월 · 카드 ' + (counts[m] || 0) + '장 / 원문 글 ' + num(arts[m] || 0) + '건 · 댓글 ' + num(cmts[m] || 0) + '개">' +
+        '<b>' + (+m.slice(5)) + '월</b><span>' + num(counts[m] || 0) + '</span></button>');
     });
     html.push('</div>');
     $('#mstrip').innerHTML = html.join('');
   }
 
+  function foldBtn(folded) {
+    return '<button class="pbfold" type="button" id="btnPbFold" aria-expanded="' + (folded ? 'false' : 'true') + '">' +
+      (folded ? '펼치기 ▾' : '접기 ▴') + '</button>';
+  }
+
+  function chipLabel(id, a) {
+    var m = CMETA[id] || {};
+    return m.ch || m.t || a.t;
+  }
+
   function renderPlaybook() {
     var box = $('#playbook');
-    if (S.month === 'all') { box.innerHTML = yearHtml(); return; }
+    var folded = pbFolded();
+    box.classList.toggle('folded', folded);
+    if (S.month === 'all') { box.innerHTML = yearHtml(folded); return; }
     var pb = (DATA.monthlyPlaybooks || {})[S.month];
     if (!pb) {
       box.innerHTML = '<div class="pb-head"><div class="pb-kick">' + esc(mLabel(S.month)) + ' 업무 흐름</div>' +
@@ -220,7 +249,7 @@
     var steps = pb.steps.map(function (s, i) {
       var chips = (s[2] || []).map(function (id) {
         var a = BYID[id]; if (!a) return '';
-        return '<button class="mini-chip" type="button" data-jump="' + id + '" title="' + esc(a.t) + '">' + esc(cut(a.t, 26)) + '</button>';
+        return '<button class="mini-chip" type="button" data-jump="' + id + '" title="' + esc((CMETA[id] || {}).t || a.t) + '">' + esc(chipLabel(id, a)) + '</button>';
       }).join('');
       return '<li class="step"><div class="step-top"><span class="step-no">' + (i + 1) + '</span><span class="step-line"></span></div>' +
         '<h3>' + esc(s[0]) + '</h3><p>' + esc(s[1]) + '</p>' +
@@ -230,25 +259,30 @@
       var id = (p[2] || [])[0];
       var a = id ? BYID[id] : null;
       return '<li><div><b>' + esc(p[0]) + '</b><span>' + esc(p[1]) + '</span></div>' +
-        (a ? '<button class="mini-chip" type="button" data-jump="' + id + '">카드</button>' : '<span></span>') + '</li>';
+        (a ? '<button class="mini-chip" type="button" data-jump="' + id + '" title="' + esc((CMETA[id] || {}).t || a.t) + '">' + esc(chipLabel(id, a)) + '</button>' : '<span></span>') + '</li>';
     }).join('');
+    var arts = (DATA.month_counts || {})[S.month] || 0;
+    var cmts = (DATA.month_comments || {})[S.month] || 0;
+    var cards = CARDS.filter(function (c) { return c.a.m === S.month; }).length;
     box.innerHTML =
       '<div class="pb-head">' +
-      '<div class="pb-kick">' + esc(mLabel(S.month)) + ' 업무 흐름 · 2026</div>' +
+      '<div class="pb-top"><div class="pb-kick">' + esc(mLabel(S.month)) + ' 업무 흐름 · 2026</div>' + foldBtn(folded) + '</div>' +
       '<h1><small>' + esc(mLabel(S.month)) + '에 할 일</small>' + esc(pb.label) + '</h1>' +
-      '<p class="pb-sum">' + esc(pb.summary) + '</p></div>' +
+      '<p class="pb-sum">' + esc(pb.summary) + '</p>' +
+      '<p class="pb-sub">원문 글 ' + num(arts) + '건 · 댓글 ' + num(cmts) + '개에서 뽑은 대표 카드 ' + num(cards) + '장</p></div>' +
       '<ol class="flow">' + steps + '</ol>' +
-      '<div class="mines"><div class="mines-h"><span class="mines-ic">⚠️</span><div>' +
+      '<div class="mines" id="mines"><div class="mines-h"><span class="mines-ic">⚠️</span><div>' +
       '<b>이달의 지뢰 ' + pb.pitfalls.length + '</b><em>여기서 미끄러지면 복구가 어렵거나 일이 두 배가 됩니다</em></div></div>' +
       '<ul>' + mines + '</ul></div>';
   }
 
-  function yearHtml() {
+  function yearHtml(folded) {
     var items = MONTHS.map(function (m) {
       var pb = (DATA.monthlyPlaybooks || {})[m];
       if (!pb) return '';
+      var n = CARDS.filter(function (c) { return c.a.m === m; }).length;
       return '<li><button class="ym" type="button" data-m="' + m + '">' +
-        '<b>' + (+m.slice(5)) + '월</b>' +
+        '<b>' + (+m.slice(5)) + '월<em>' + n + '장</em></b>' +
         '<span class="yt">' + esc(pb.label) + '</span>' +
         '<span class="yd">' + esc(cut(pb.summary, 62)) + '</span>' +
         '<span class="yb"><span class="ytag">흐름 ' + pb.steps.length + '단계</span>' +
@@ -259,9 +293,9 @@
         '<h1>플레이북 데이터를 기다리는 중입니다</h1><p class="pb-sum">데이터 양식이 예전 것입니다 — 위의 <b>동기화</b>를 눌러 새 플레이북 데이터를 받아 주세요.</p></div>';
     }
     var s = DATA.source || {};
-    return '<div class="pb-head"><div class="pb-kick">2026 한 해 업무 흐름</div>' +
+    return '<div class="pb-head"><div class="pb-top"><div class="pb-kick">2026 한 해 업무 흐름</div>' + foldBtn(folded) + '</div>' +
       '<h1><small>1월부터 10월까지</small>달을 고르면 그 달의 순서와 지뢰가 먼저 보입니다</h1>' +
-      '<p class="pb-sum">본문 ' + num(s.articles) + '건 · 댓글 ' + num(s.comments) + '건에서 뽑은 대표 질문 ' +
+      '<p class="pb-sum">본문 ' + num(s.articles) + '건 · 댓글 ' + num(s.comments) + '건에서 뽑은 대표 카드 ' +
       num(CARDS.length) + '장을 경중(🔴 사고주의 / 🟡 예외주의 / 🟢 단순팁)으로 나눴습니다. ' +
       '아래 10개 월 카드를 누르면 그 달의 업무 순서와 지뢰부터 보여 줍니다.</p></div>' +
       '<ol class="yearflow">' + items + '</ol>';
@@ -270,9 +304,10 @@
   function renderFooter() {
     var s = DATA.source || {};
     $('#ftr').innerHTML = 'Y공작소 아카이브 · 본문 ' + num(s.articles) + '건 / 댓글 ' + num(s.comments) +
-      '건 · 대표 질문 카드 ' + num(CARDS.length) + '장 · 데이터 기준 ' + esc(DATA.built_at || '') +
+      '건 · 대표 카드 ' + num(CARDS.length) + '장 · 데이터 기준 ' + esc(DATA.built_at || '') +
       '<br>이 앱(GitHub Pages)에는 데이터가 없고, 내 구글 드라이브의 비공개 파일에서 이 기기로만 받아 옵니다. ' +
-      '카드의 1줄 결론과 지뢰 표시는 원문 글·댓글을 근거로 정리한 것이며, 확인되지 않은 사안은 예외로 표시했습니다.';
+      '카드 제목·1줄 결론·지뢰 표시는 원문 글·댓글을 근거로 정리한 것이고, 메뉴 경로와 공식 표시(매뉴얼 p.)는 ' +
+      '2026학년도 경기도 초등학교용 나이스 교무업무 매뉴얼에서 확인된 것만 넣었습니다. 확인되지 않은 사안은 예외로 표시했습니다.';
   }
 
   /* ── 필터 계산 ────────────────────────────────────────── */
@@ -280,7 +315,9 @@
   function hay(a) {
     var v = HAY.get(a.i);
     if (v) return v;
-    v = (a.t + ' ' + (a.bd || '') + ' ' + (a.x || '') + ' ' + (a.b || '') + ' ' + (a.p || '') + ' ' +
+    var m = CMETA[a.i];
+    v = (a.t + ' ' + (m ? (m.t || '') + ' ' + (m.ch || '') + ' ' + (m.mp || '') + ' ' + (m.one || '') : '') + ' ' +
+      (a.bd || '') + ' ' + (a.x || '') + ' ' + (a.b || '') + ' ' + (a.p || '') + ' ' +
       (a.cm || []).map(function (c) { return c.c; }).join(' ')).toLowerCase();
     HAY.set(a.i, v); return v;
   }
@@ -333,7 +370,9 @@
   }
 
   function cardSrcHtml(a) {
+    var m = CMETA[a.i] || {};
     var src = '';
+    src += '<div class="otitle"><b>원문 제목</b>' + esc(a.t) + '</div>';
     if (a.x) src += '<div class="note"><b>정리</b>' + esc(a.x) + '</div>';
     if (a.bc) {
       src += '<div class="quote' + (a.bc.ms ? ' ms' : '') + '"><span class="who">' +
@@ -351,18 +390,22 @@
   function cardHtml(c) {
     var a = c.a, m = c.m;
     var tags = '<span class="sev sev-' + m.sv + '">' + SEVLBL[m.sv] + '</span>' +
-      '<span class="tg">' + ROLLBL[m.r] + '</span>' +
-      (m.g === 'gyeonggi' ? '<span class="tg reg-g">경기 기준</span>' : '') +
-      (a.s ? '<span class="tg ms">맑은샘 답변</span>' : '') +
-      '<span class="tg topic" title="' + esc(c.topic) + '">' + esc(cut(c.topic, 18)) + '</span>';
+      '<span class="tg role">' + ROLLBL[m.r] + '</span>' +
+      '<span class="tg topic" title="' + esc(c.topic) + '">' + esc(cut(c.topic, 16)) + '</span>' +
+      (m.g === 'gyeonggi' ? '<span class="tg reg-g">경기</span>' : '');
+    var mp = m.mp ? '<div class="mp"><span class="mpk">메뉴</span>' + esc(pathText(m.mp)) +
+      (m.mpp ? '<span class="mpp">매뉴얼 p.' + m.mpp + '</span>' : '') + '</div>' : '';
     return '<article class="card sev-' + m.sv + '" data-id="' + a.i + '">' +
       '<div class="ctags">' + tags + '</div>' +
-      '<h3 class="cq"><a href="' + esc(a.u) + '" target="_blank" rel="noopener">' + esc(a.t) + '</a></h3>' +
+      '<h3 class="cq"><a href="' + esc(a.u) + '" target="_blank" rel="noopener">' + esc(m.t || a.t) + '</a></h3>' +
       '<p class="one">' + esc(m.one) + '</p>' +
+      mp +
+      (m.mn ? '<p class="mn"><b>공식</b>' + esc(m.mn) + '</p>' : '') +
       (m.ex ? '<p class="ex"><b>예외</b>' + esc(m.ex) + '</p>' : '') +
       '<div class="cmeta"><span>' + esc(mLabel(a.m)) + ' ' + esc(String(a.d).slice(0, 10)) + '</span><span class="dot"></span>' +
+      '<span>' + esc(a.b) + '</span><span class="dot"></span>' +
       '<span>댓글 ' + num(a.n) + '</span>' + (a.l ? '<span class="dot"></span><span>♥ ' + num(a.l) + '</span>' : '') +
-      '<span class="dot"></span><span>' + esc(a.b) + '</span></div>' +
+      (a.s ? '<span class="dot"></span><span class="ms">맑은샘 답변</span>' : '') + '</div>' +
       '<details class="src"><summary>근거 글·댓글 ' + num(a.n) + '개 보기</summary></details>' +
       '</article>';
   }
@@ -385,6 +428,7 @@
       DATA.articles.filter(function (a) { return a.m === S.month; }).length;
     $('#countTxt').innerHTML = '카드 <b>' + num(list.length) + '</b>장' +
       (S.month === 'all' ? ' · 전체 ' + num(monthArts) + '건' : ' · ' + esc(mLabel(S.month)) + ' 글 ' + num(monthArts) + '건');
+    barState('카드 ' + num(list.length) + '장');
     window.__naState = {
       articles: DATA.articles.length, cards: CARDS.length, rendered: list.length,
       topics: (DATA.topics || []).length, built: DATA.built_at, month: S.month, mode: 'deck'
@@ -413,6 +457,7 @@
     }
     $('#searchPanel').innerHTML = h.join('');
     $('#countTxt').innerHTML = '검색 <b>' + num(searchHits.length) + '</b>건';
+    barState('검색 ' + num(searchHits.length) + '건');
     window.__naState = {
       articles: DATA.articles.length, cards: CARDS.length, topics: (DATA.topics || []).length,
       built: DATA.built_at, month: S.month, mode: 'search', hits: searchHits.length
@@ -431,7 +476,7 @@
     var note = preview ? '<span class="rn' + (meta ? ' rn-one' : '') + '">' + esc(cut(preview, 150)) + '</span>' : '';
     return '<details class="row" data-id="' + a.i + '">' +
       '<summary><span class="rd">' + esc(mLabel(a.m)) + ' ' + esc(String(a.d).slice(8, 10)) + '일</span>' +
-      '<span class="rt"><span class="rb">' + esc(cut(a.p || a.b, 16)) + '</span> ' + esc(a.t) + note + '</span>' +
+      '<span class="rt"><span class="rb">' + esc(cut(a.p || a.b, 16)) + '</span> ' + esc(meta ? (meta.t || a.t) : a.t) + note + '</span>' +
       '<span class="rm">' + (a.s ? '<span class="ms">맑은샘</span>' : '') +
       (a.pa ? '<span class="pt" title="첫 10개 댓글만 보관">일부</span>' : '') +
       '<span>💬' + num(a.n) + '</span>' + (a.l ? '<span>♥' + num(a.l) + '</span>' : '') + '</span></summary>' +
@@ -463,6 +508,7 @@
   function detailHtml(a) {
     var h = ['<div class="detail">'];
     var m = CMETA[a.i];
+    h.push('<div class="otitle"><b>원문 제목</b>' + esc(a.t) + '</div>');
     if (m) h.push('<div class="onetag">' + SEVLBL[m.sv] + ' · ' + esc(m.one) + '</div>');
     if (a.x) h.push('<div class="note"><b>정리</b>' + esc(a.x) + '</div>');
     if (a.bd) h.push('<div class="note"><b>원문 글</b><div class="qbody" style="max-height:none">' + esc(a.bd) + '</div></div>');
@@ -511,6 +557,18 @@
     el.textContent = text;
     el.className = 'state' + (kind ? ' ' + kind : '');
     el.title = text;
+    barState(null, kind);
+  }
+
+  /* 모바일 상단바에서는 상태 문구를 숨기므로, 고정 바 안에 짧게 같이 보여 준다. */
+  function barState(count, kind) {
+    var el = $('#barState');
+    if (!el) return;
+    if (count != null) barState._n = count;
+    var st = $('#stateTxt');
+    var txt = (barState._n || '') + (st && st.textContent ? ' · ' + st.textContent : '');
+    el.textContent = txt;
+    el.className = 'bstate' + (kind ? ' ' + kind : '');
   }
 
   /* ── 전체 렌더 ────────────────────────────────────────── */
@@ -519,6 +577,7 @@
     renderPlaybook();
     renderRows();
     renderDeck();
+    syncTopbarHeight();
     var m = $$('#mstrip .mbtn').filter(function (b) { return b.dataset.m === S.month; })[0];
     if (m && m.scrollIntoView && m.parentNode && m.parentNode.scrollWidth > m.parentNode.clientWidth) {
       m.scrollIntoView({ block: 'nearest', inline: 'center' });
@@ -530,7 +589,7 @@
     S.topic = '';
     renderAll();
     if (scroll) {
-      var top = $('#playbook').getBoundingClientRect().top + window.pageYOffset - 108;
+      var top = $('#playbook').getBoundingClientRect().top + window.pageYOffset - barPad();
       window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }
   }
@@ -545,7 +604,7 @@
     el.classList.remove('flash');
     void el.offsetWidth;
     el.classList.add('flash');
-    var top = el.getBoundingClientRect().top + window.pageYOffset - 96;
+    var top = el.getBoundingClientRect().top + window.pageYOffset - barPad() - 6;
     window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
   }
 
@@ -722,8 +781,25 @@
       if (tb) {
         S.topic = tb.dataset.topic; S.month = 'all';
         renderAll();
-        var top = $('#deckbar').getBoundingClientRect().top + window.pageYOffset - 104;
+        var top = $('#deckbar').getBoundingClientRect().top + window.pageYOffset - barPad();
         window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+        return;
+      }
+      var fold = e.target.closest('#btnPbFold');
+      if (fold) {
+        lsSet(LS_PBFOLD, pbFolded() ? '' : '1');
+        renderPlaybook();
+        syncTopbarHeight();
+        return;
+      }
+      var go = e.target.closest('[data-go]');
+      if (go) {
+        var target = go.dataset.go === 'mines' ? $('#mines')
+          : go.dataset.go === 'cards' ? $('#cards') : $('#playbook');
+        if (!target) return;
+        if (go.dataset.go !== 'playbook' && pbFolded()) { lsSet(LS_PBFOLD, ''); renderPlaybook(); syncTopbarHeight(); }
+        var t2 = target.getBoundingClientRect().top + window.pageYOffset - barPad() - 4;
+        window.scrollTo({ top: Math.max(0, t2), behavior: 'smooth' });
         return;
       }
       if (e.target.closest('#btnMoreHit')) {
@@ -768,7 +844,10 @@
     window.addEventListener('online', function () { autoSync(); });
     window.addEventListener('resize', function () { syncTopbarHeight(); });
     if (typeof ResizeObserver !== 'undefined') {
-      try { new ResizeObserver(syncTopbarHeight).observe($('.topbar')); } catch (e) { /* noop */ }
+      try {
+        var ro = new ResizeObserver(syncTopbarHeight);
+        ['.topbar', '#mstrip', '#deckbar'].forEach(function (s) { var el = $(s); if (el) ro.observe(el); });
+      } catch (e) { /* noop */ }
     }
   }
 
@@ -779,7 +858,7 @@
       window.addEventListener('load', function () {
         /* 주소의 ?v= 를 바꾸면 새 워커로 갈아탄다(HTTP 캐시에 옛 sw.js 가 남아도 확실히).
            릴리스할 때마다 sw.js 의 VERSION 과 이 값을 함께 올린다. */
-        navigator.serviceWorker.register('sw.js?v=7').catch(function () { });
+        navigator.serviceWorker.register('sw.js?v=8').catch(function () { });
       });
     }
     var cached = memRec;
