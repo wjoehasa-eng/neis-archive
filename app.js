@@ -187,13 +187,14 @@
   function renderMonths() {
     var counts = Object.create(null);
     CARDS.forEach(function (c) { counts[c.a.m] = (counts[c.a.m] || 0) + 1; });
+    var arts = DATA.month_counts || {};
     var html = ['<div class="mstrip-in">'];
     html.push('<button class="mbtn all' + (S.month === 'all' ? ' on' : '') + '" type="button" data-m="all">' +
       '<b>전체</b><span>카드 ' + CARDS.length + '</span></button>');
     MONTHS.forEach(function (m) {
       html.push('<button class="mbtn' + (S.month === m ? ' on' : '') + '" type="button" data-m="' + m + '"' +
-        ' title="' + m.slice(5) + '월 · 글 ' + num((DATA.month_counts || {})[m] || 0) + '건 · 카드 ' + (counts[m] || 0) + '장">' +
-        '<b>' + (+m.slice(5)) + '월</b><span>' + (counts[m] || 0) + '</span></button>');
+        ' title="' + m.slice(5) + '월 글 ' + num(arts[m] || 0) + '건 · 카드 ' + (counts[m] || 0) + '장">' +
+        '<b>' + (+m.slice(5)) + '월</b><span>' + num(arts[m] || 0) + '</span></button>');
     });
     html.push('</div>');
     $('#mstrip').innerHTML = html.join('');
