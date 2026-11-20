@@ -198,7 +198,7 @@
     var arts = DATA.month_counts || {};
     var html = ['<div class="mstrip-in">'];
     html.push('<button class="mbtn all' + (S.month === 'all' ? ' on' : '') + '" type="button" data-m="all">' +
-      '<b>전체</b><span>카드 ' + CARDS.length + '</span></button>');
+      '<b>전체</b><span>' + CARDS.length + '</span></button>');
     MONTHS.forEach(function (m) {
       html.push('<button class="mbtn' + (S.month === m ? ' on' : '') + '" type="button" data-m="' + m + '"' +
         ' title="' + m.slice(5) + '월 글 ' + num(arts[m] || 0) + '건 · 카드 ' + (counts[m] || 0) + '장">' +
@@ -767,6 +767,9 @@
     });
     window.addEventListener('online', function () { autoSync(); });
     window.addEventListener('resize', function () { syncTopbarHeight(); });
+    if (typeof ResizeObserver !== 'undefined') {
+      try { new ResizeObserver(syncTopbarHeight).observe($('.topbar')); } catch (e) { /* noop */ }
+    }
   }
 
   /* ── 시작 ────────────────────────────────────────────── */
