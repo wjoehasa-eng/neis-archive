@@ -417,6 +417,7 @@
     var searching = !!q;
     $('#cards').hidden = searching;
     $('#searchPanel').hidden = !searching;
+    $('#playbook').hidden = searching;
     $('#rowsBox').hidden = searching;
     $('#topicsBox').hidden = searching;
     $('#btnClearQ').hidden = !q;
