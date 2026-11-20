@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Y공작소 이슈 아카이브</title>
+<meta name="theme-color" content="#0f172a">
+<meta name="description" content="2026년 1~10월 Y공작소 본문·댓글 아카이브. 데이터는 내 비공개 구글 드라이브에서만 불러옵니다.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="kick">Y-WORKSHOP ARCHIVE · PRIVATE DATA</div>
+    <h1 id="appTitle">Y공작소 이슈 아카이브</h1>
+    <p id="heroSub">앱에는 데이터가 없습니다. 내 구글 드라이브의 비공개 파일을 불러와 이 기기에만 담아 둡니다.</p>
+    <div class="chips" id="chips" hidden></div>
+    <div class="herobar">
+      <span class="state" id="stateTxt">데이터 없음</span>
+      <span class="hb-sp"></span>
+      <button class="btn primary" type="button" id="btnSync">동기화</button>
+      <button class="btn" type="button" id="btnSet">⚙ 설정</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- 데이터가 없을 때 -->
+  <section class="panel setup" id="setupPanel">
+    <div class="phead"><h2>🔒 데이터를 불러오세요</h2><span class="hint">한 번만 설정하면 다음부터는 자동</span></div>
+    <div class="setupbody">
+      <p class="lead">이 앱(GitHub Pages)에는 게시글·댓글이 <b>한 줄도</b> 들어 있지 않습니다. 실제 데이터는 내 구글 드라이브의 비공개 JSON 파일에만 있고, 아래 두 방법 중 하나로 이 기기에 불러옵니다.</p>
+      <div class="way">
+        <div class="wayhead"><span class="num">1</span><h3>내 드라이브에서 자동으로 불러오기</h3><span class="bdg ms">권장</span></div>
+        <p>구글 드라이브 파일을 읽어 주는 <b>비공개 연결 주소</b>를 설정에 한 번 붙여넣으면, 앱을 열 때마다 최신 데이터를 자동으로 받아 IndexedDB에 담아 둡니다.</p>
+        <div class="waybtns">
+          <button class="btn primary" type="button" id="btnSetupConnect">연결 주소 넣기</button>
+          <a class="btn" id="guideLink" href="https://github.com/wjoehasa-eng/neis-archive/blob/main/apps-script/SETUP.md" target="_blank" rel="noopener">처음 설정 안내</a>
+        </div>
+      </div>
+      <div class="way">
+        <div class="wayhead"><span class="num">2</span><h3>내려받은 JSON 파일 열기</h3><span class="bdg">보조</span></div>
+        <p>휴대폰이나 PC에 <code>neis-y2026-archive.json</code>이 있으면 골라서 열 수 있습니다. 불러온 뒤에도 이 기기 저장소에 담기므로 인터넷 없이 열립니다.</p>
+        <div class="waybtns"><button class="btn" type="button" id="btnSetupFile">JSON 파일 선택</button></div>
+      </div>
+      <p class="mini">연결 주소·데이터는 이 브라우저에만 저장되고 GitHub에는 올라가지 않습니다. 연결 주소를 아는 사람은 데이터를 볼 수 있으니 공유하지 마세요.</p>
+    </div>
+  </section>
+
+  <div id="content" hidden>
+    <!-- 요약 -->
+    <section class="panel summary" id="summary">
+      <div class="phead">
+        <h2>📊 한눈에 보기 <span class="hint" id="sumHint"></span></h2>
+        <div class="pheadbtns">
+          <button class="btn sm" type="button" id="btnTop10">1~10월</button>
+          <button class="btn sm" type="button" id="btnSumFold">요약 접기</button>
+        </div>
+      </div>
+      <div class="sumbar" id="sumbar">
+        <div class="stats" id="stats"></div>
+        <div class="cols">
+          <div>
+            <h3 class="sec">월별 댓글 분포 — 막대를 누르면 그 달만 봅니다</h3>
+            <div class="mbars" id="mbars"></div>
+          </div>
+          <div>
+            <h3 class="sec">주제별 댓글 — 이름을 누르면 그 주제로</h3>
+            <div id="rank"></div>
+          </div>
+        </div>
+        <div class="note-box" id="noteBox"></div>
+      </div>
+    </section>
+
+    <!-- 맑은샘 하이라이트 -->
+    <section class="panel hlbox" id="hlBox">
+      <div class="phead">
+        <h2>💬 맑은샘 답변 하이라이트 <span class="hint" id="hlHint"></span></h2>
+        <button class="btn sm" type="button" id="btnHL">접기</button>
+      </div>
+      <ul class="hlist" id="hlist"></ul>
+    </section>
+
+    <!-- 도구 막대 -->
+    <div class="toolbar" id="toolbar">
+      <div class="tb">
+        <span class="lb">월별</span>
+        <div class="mtabs" id="mtabs"></div>
+      </div>
+      <div class="tb">
+        <span class="lb">기간</span>
+        <span class="rngwrap"><select id="mFrom" aria-label="시작 월"></select><span class="tilde">~</span><select id="mTo" aria-label="끝 월"></select></span>
+        <div class="pills" id="presets">
+          <button class="pill on" type="button" data-preset="1-10">전체 1~10월</button>
+          <button class="pill" type="button" data-preset="1-6">1~6월</button>
+          <button class="pill" type="button" data-preset="3-4">3~4월</button>
+          <button class="pill" type="button" data-preset="8-10">8~10월</button>
+        </div>
+        <span class="cnt" id="rng">선택 기간 <b>1~10월</b></span>
+      </div>
+      <div class="tb">
+        <span class="lb">검색</span>
+        <input type="search" id="q" placeholder="제목·본문·댓글 검색 (예: 반변경, 학기말종합의견, 주소연계)" autocomplete="off">
+        <button class="pill" type="button" id="msOnly">맑은샘 답변 포함만</button>
+        <button class="pill" type="button" id="btnClear">조건 초기화</button>
+        <span class="hb-sp"></span>
+        <button class="btn sm" type="button" id="btnAllOpen">전체 펼치기</button>
+        <button class="btn sm" type="button" id="btnAllClose">전체 접기</button>
+      </div>
+    </div>
+
+    <div id="topics"></div>
+
+    <div class="ftr" id="ftr"></div>
+  </div>
+</main>
+
+<button class="top" type="button" id="btnTop" aria-label="맨 위로">↑</button>
+<div class="toast" id="toast" hidden></div>
+<input type="file" id="fileIn" accept=".json,application/json" hidden>
+
+<!-- 설정 -->
+<dialog id="dlg">
+  <form method="dialog" class="dlgbody">
+    <div class="dlghead">
+      <h2>⚙ 설정</h2>
+      <button class="xbtn" type="button" id="dlgClose" aria-label="닫기">✕</button>
+    </div>
+
+    <label class="fld">
+      <span class="flabel">비공개 연결 주소</span>
+      <input type="url" id="fldUrl" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" spellcheck="false">
+      <span class="fhint">구글 드라이브 파일을 읽어 주는 Apps Script 웹앱 주소입니다. 이 기기에만 저장됩니다.</span>
+    </label>
+
+    <label class="fld">
+      <span class="flabel">접근 키 <em>(선택 · 연결 쪽에서 키를 켠 경우에만)</em></span>
+      <input type="text" id="fldKey" placeholder="ACCESS_KEY 와 같은 값" autocomplete="off" spellcheck="false">
+    </label>
+
+    <div class="dlgrow">
+      <button class="btn primary" type="button" id="dlgSave">저장하고 동기화</button>
+      <button class="btn" type="button" id="dlgTest">연결 테스트</button>
+      <button class="btn" type="button" id="dlgFile">JSON 파일 열기</button>
+    </div>
+
+    <div class="dlginfo" id="dlgInfo"></div>
+
+    <details class="dlghelp">
+      <summary>처음 설정하기 (4단계)</summary>
+      <ol>
+        <li><a href="https://script.new" target="_blank" rel="noopener">script.new</a>를 열어 새 Apps Script를 만듭니다.</li>
+        <li>이 저장소의 <b>apps-script/Code.gs</b> 내용을 전부 붙여넣고 저장합니다.</li>
+        <li><b>배포 → 새 배포 → 웹앱</b> · 실행: <b>나</b> · 액세스: <b>모든 사용자</b> 로 배포하고 <b>웹앱 URL</b>을 복사합니다.</li>
+        <li>위 <b>비공개 연결 주소</b>에 그 URL을 붙여넣고 <b>저장하고 동기화</b>를 누릅니다.</li>
+      </ol>
+      <p class="mini">데이터 파일은 내 드라이브에 비공개로 두고, 스크립트가 나(소유자) 권한으로 읽어 전달합니다. 공유 권한은 추가하지 않습니다.</p>
+    </details>
+
+    <div class="dlgfoot">
+      <span class="mini" id="dlgWhere"></span>
+      <button class="btn danger" type="button" id="dlgWipe">이 기기의 데이터 지우기</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

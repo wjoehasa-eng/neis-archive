@@ -1,0 +1,19 @@
+{
+  "name": "Y공작소 이슈 아카이브",
+  "short_name": "Y아카이브",
+  "description": "2026년 1~10월 Y공작소 본문·댓글 아카이브. 데이터는 내 비공개 구글 드라이브에서만 불러옵니다.",
+  "lang": "ko",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#eceff3",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
