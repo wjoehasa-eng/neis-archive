@@ -22,7 +22,7 @@
   var lastMeta = null, syncing = false;
 
   window.__naErrors = [];
-  window.__naVersion = '2026-11-20.6';
+  window.__naVersion = '2026-11-20.7';
   window.addEventListener('error', function (e) { window.__naErrors.push(String((e && e.message) || e)); });
   window.addEventListener('unhandledrejection', function (e) {
     var r = e && e.reason; window.__naErrors.push('promise: ' + String((r && r.message) || r));
@@ -779,7 +779,7 @@
       window.addEventListener('load', function () {
         /* 주소의 ?v= 를 바꾸면 새 워커로 갈아탄다(HTTP 캐시에 옛 sw.js 가 남아도 확실히).
            릴리스할 때마다 sw.js 의 VERSION 과 이 값을 함께 올린다. */
-        navigator.serviceWorker.register('sw.js?v=6').catch(function () { });
+        navigator.serviceWorker.register('sw.js?v=7').catch(function () { });
       });
     }
     var cached = memRec;
