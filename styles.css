@@ -386,6 +386,17 @@ dialog#dlg::backdrop{background:rgba(14,20,30,.42);backdrop-filter:blur(2px)}
 
 @media (max-width:560px){
   .wrap{padding:0 14px}
+  .tb-in{padding:8px 12px;gap:8px}
+  .brand .logo{width:28px;height:28px;border-radius:8px;font-size:14px}
+  .bt b{font-size:14px}
+  .bt em{font-size:10.5px}
+  .state{display:none}
+  .btn.small{padding:6px 10px;font-size:12.5px}
+  .mstrip{top:45px}
+  .mstrip-in{padding:7px 12px;gap:5px}
+  .mbtn{min-width:46px;padding:6px 9px}
+  .mbtn b{font-size:13.5px}
+  .mbtn span{font-size:10px}
   .pb-head{padding:18px 16px 4px}
   .pb-head h1{font-size:22px}
   .flow{padding:14px 16px 4px;gap:16px}
