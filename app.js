@@ -565,10 +565,11 @@
   function barState(count, kind) {
     var el = $('#barState');
     if (!el) return;
-    if (count != null) barState._n = count;
     var st = $('#stateTxt');
-    var txt = (barState._n || '') + (st && st.textContent ? ' · ' + st.textContent : '');
-    el.textContent = txt;
+    var t = (st && st.textContent) || '';
+    if (count != null) barState._n = count;
+    t = t.replace(/불러옴 \d{4}-\d{2}-\d{2} /, '불러옴 ').replace(/\s*·\s*(내 JSON 파일|드라이브)$/, '');
+    el.textContent = t ? '· ' + t : '';
     el.className = 'bstate' + (kind ? ' ' + kind : '');
   }
 

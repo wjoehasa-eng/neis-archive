@@ -436,7 +436,9 @@ dialog#dlg::backdrop{background:rgba(14,20,30,.42);backdrop-filter:blur(2px)}
   .mbtn span{font-size:10px}
   .deckbar{padding:7px 0 6px;gap:6px}
   .jumprow{display:flex}
-  .bstate{display:inline-block}
+  .bstate{display:inline-block;max-width:56vw;text-align:right}
+  .deckfoot{flex-wrap:nowrap;gap:8px}
+  .sortwrap{display:none}
   #q{padding:10px 38px 10px 34px;font-size:14px;border-radius:11px}
   .sic{left:11px;font-size:16px}
   .chip{padding:5px 10px;font-size:12.5px}
