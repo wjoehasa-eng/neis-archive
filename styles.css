@@ -80,7 +80,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;bac
 .mbtn span{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .mbtn:hover{background:#fff;border-color:var(--line)}
 .mbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}
-.mbtn.on span{color:rgba(255,255,255,.72)}
+.mbtn.on span{color:rgba(255,255,255,.88)}
 .mbtn.all{min-width:64px}
 .mbtn.all b{font-size:13.5px}
 
