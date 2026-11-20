@@ -426,8 +426,9 @@
   }
 
   function rowHtml(a) {
-    var note = a.x ? '<span class="rn">' + esc(cut(a.x, 150)) + '</span>' :
-      (a.bc ? '<span class="rn">' + esc(cut(a.bc.c, 150)) + '</span>' : '');
+    var meta = CMETA[a.i];
+    var preview = meta ? meta.one : (a.x || (a.bc && a.bc.c));
+    var note = preview ? '<span class="rn' + (meta ? ' rn-one' : '') + '">' + esc(cut(preview, 150)) + '</span>' : '';
     return '<details class="row" data-id="' + a.i + '">' +
       '<summary><span class="rd">' + esc(mLabel(a.m)) + ' ' + esc(String(a.d).slice(8, 10)) + '일</span>' +
       '<span class="rt"><span class="rb">' + esc(cut(a.p || a.b, 16)) + '</span> ' + esc(a.t) + note + '</span>' +
