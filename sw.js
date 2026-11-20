@@ -1,7 +1,11 @@
 /* 앱 껍데기(HTML·CSS·JS·아이콘)만 담는다.
  * 실제 데이터(게시글·댓글)는 여기에 캐시하지 않는다 — IndexedDB에만 담긴다.
+ *
+ * 껍데기는 '네트워크 먼저, 실패하면 캐시'로 받는다.
+ * (HTML만 새로 받고 JS/CSS는 옛 캐시로 쓰면 화면이 깨지기 때문 — 버전을 올려도
+ *  새 워커가 활성화되기 전 첫 방문에서 그런 어긋남이 생긴다.)
  */
-var VERSION = 'neis-archive-v2';
+var VERSION = 'neis-archive-v3';
 var SHELL = [
   './',
   './index.html',
@@ -34,23 +38,21 @@ self.addEventListener('fetch', function (e) {
   var url = new URL(req.url);
   if (url.origin !== location.origin) return;             // 외부 요청은 손대지 않음
 
-  if (req.mode === 'navigate') {
-    e.respondWith(
-      fetch(req).catch(function () { return caches.match('./index.html'); })
-    );
-    return;
-  }
+  var net = fetch(req).then(function (res) {
+    if (res && res.ok && res.type === 'basic') {
+      var copy = res.clone();
+      caches.open(VERSION).then(function (c) { c.put(req, copy); }).catch(function () {});
+    }
+    return res;
+  });
 
   e.respondWith(
-    caches.match(req).then(function (hit) {
-      var net = fetch(req).then(function (res) {
-        if (res && res.ok && res.type === 'basic') {
-          var copy = res.clone();
-          caches.open(VERSION).then(function (c) { c.put(req, copy); });
-        }
-        return res;
-      }).catch(function () { return hit; });
-      return hit || net;
+    net.catch(function () {
+      return caches.match(req).then(function (hit) {
+        if (hit) return hit;
+        if (req.mode === 'navigate') return caches.match('./index.html');
+        return Response.error();
+      });
     })
   );
 });
