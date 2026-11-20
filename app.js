@@ -176,7 +176,15 @@
   function topicColor(name) { var t = TOPICMETA[name]; return (t && t.c) || '#9aa0ac'; }
 
   /* ── 셸(정적 영역) ────────────────────────────────────── */
+  function syncTopbarHeight() {
+    var tb = $('.topbar');
+    if (!tb) return;
+    var h = Math.round(tb.getBoundingClientRect().height);
+    document.documentElement.style.setProperty('--tb-h', h + 'px');
+  }
+
   function renderShell() {
+    syncTopbarHeight();
     renderMonths();
     renderPlaybook();
     renderRows();
@@ -757,6 +765,7 @@
       if (document.visibilityState === 'visible') autoSync();
     });
     window.addEventListener('online', function () { autoSync(); });
+    window.addEventListener('resize', function () { syncTopbarHeight(); });
   }
 
   /* ── 시작 ────────────────────────────────────────────── */

@@ -63,7 +63,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;bac
 
 /* ── 월 스트립 ───────────────────────────────────────────── */
 .mstrip{
-  position:sticky;top:49px;z-index:35;background:var(--bg);
+  position:sticky;top:var(--tb-h,49px);z-index:35;background:var(--bg);
   border-bottom:1px solid var(--line);
 }
 .mstrip-in{
@@ -392,7 +392,7 @@ dialog#dlg::backdrop{background:rgba(14,20,30,.42);backdrop-filter:blur(2px)}
   .bt em{font-size:10.5px}
   .state{display:none}
   .btn.small{padding:6px 10px;font-size:12.5px}
-  .mstrip{top:45px}
+  .step-line{display:none}
   .mstrip-in{padding:7px 12px;gap:5px}
   .mbtn{min-width:46px;padding:6px 9px}
   .mbtn b{font-size:13.5px}
