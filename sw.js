@@ -1,7 +1,7 @@
 /* 앱 껍데기(HTML·CSS·JS·아이콘)만 담는다.
  * 실제 데이터(게시글·댓글)는 여기에 캐시하지 않는다 — IndexedDB에만 담긴다.
  */
-var VERSION = 'neis-archive-v1';
+var VERSION = 'neis-archive-v2';
 var SHELL = [
   './',
   './index.html',

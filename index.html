@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Y공작소 이슈 아카이브</title>
-<meta name="theme-color" content="#0f172a">
-<meta name="description" content="2026년 1~10월 Y공작소 본문·댓글 아카이브. 데이터는 내 비공개 구글 드라이브에서만 불러옵니다.">
+<title>Y공작소 아카이브 · 2026 나이스 플레이북</title>
+<meta name="theme-color" content="#ffffff">
+<meta name="description" content="2026년 1~10월 Y공작소 본문·댓글을 교사 실무 플레이북으로 정리했습니다. 데이터는 내 비공개 구글 드라이브에서만 불러옵니다.">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -13,111 +13,79 @@
 </head>
 <body>
 
-<header class="hero">
-  <div class="wrap">
-    <div class="kick">Y-WORKSHOP ARCHIVE · PRIVATE DATA</div>
-    <h1 id="appTitle">Y공작소 이슈 아카이브</h1>
-    <p id="heroSub">앱에는 데이터가 없습니다. 내 구글 드라이브의 비공개 파일을 불러와 이 기기에만 담아 둡니다.</p>
-    <div class="chips" id="chips" hidden></div>
-    <div class="herobar">
+<header class="topbar">
+  <div class="tb-in">
+    <a class="brand" href="#" id="brandLink">
+      <span class="logo" aria-hidden="true">Y</span>
+      <span class="bt"><b>Y공작소 아카이브</b><em id="brandSub">2026 1~10월</em></span>
+    </a>
+    <div class="tb-right">
       <span class="state" id="stateTxt">데이터 없음</span>
-      <span class="hb-sp"></span>
-      <button class="btn primary" type="button" id="btnSync">동기화</button>
-      <button class="btn" type="button" id="btnSet">⚙ 설정</button>
+      <button class="btn small" type="button" id="btnSync">동기화</button>
+      <button class="btn small ghost" type="button" id="btnSet" aria-label="설정">⚙<span class="only-wide"> 설정</span></button>
     </div>
   </div>
 </header>
+
+<nav class="mstrip" id="mstrip" aria-label="월 선택"></nav>
 
 <main class="wrap">
 
   <!-- 데이터가 없을 때 -->
   <section class="panel setup" id="setupPanel">
-    <div class="phead"><h2>🔒 데이터를 불러오세요</h2><span class="hint">한 번만 설정하면 다음부터는 자동</span></div>
-    <div class="setupbody">
-      <p class="lead">이 앱(GitHub Pages)에는 게시글·댓글이 <b>한 줄도</b> 들어 있지 않습니다. 실제 데이터는 내 구글 드라이브의 비공개 JSON 파일에만 있고, 아래 두 방법 중 하나로 이 기기에 불러옵니다.</p>
-      <div class="way">
-        <div class="wayhead"><span class="num">1</span><h3>내 드라이브에서 자동으로 불러오기</h3><span class="bdg ms">권장</span></div>
-        <p>구글 드라이브 파일을 읽어 주는 <b>비공개 연결 주소</b>를 설정에 한 번 붙여넣으면, 앱을 열 때마다 최신 데이터를 자동으로 받아 IndexedDB에 담아 둡니다.</p>
-        <div class="waybtns">
-          <button class="btn primary" type="button" id="btnSetupConnect">연결 주소 넣기</button>
-          <a class="btn" id="guideLink" href="https://github.com/wjoehasa-eng/neis-archive/blob/main/apps-script/SETUP.md" target="_blank" rel="noopener">처음 설정 안내</a>
-        </div>
+    <h2>🔒 데이터를 불러오세요</h2>
+    <p class="lead">이 앱(GitHub Pages)에는 게시글·댓글이 <b>한 줄도</b> 들어 있지 않습니다. 실제 데이터는 내 구글 드라이브의 비공개 JSON 파일에만 있고, 아래 두 방법 중 하나로 이 기기에 불러옵니다.</p>
+    <div class="way">
+      <div class="wayhead"><span class="num">1</span><h3>내 드라이브에서 자동으로 불러오기</h3><span class="bdg">권장</span></div>
+      <p>구글 드라이브 파일을 읽어 주는 <b>비공개 연결 주소</b>를 설정에 한 번 붙여넣으면, 앱을 열 때마다 최신 데이터를 자동으로 받아 이 기기에 담아 둡니다.</p>
+      <div class="waybtns">
+        <button class="btn primary" type="button" id="btnSetupConnect">연결 주소 넣기</button>
+        <a class="btn" id="guideLink" href="https://github.com/wjoehasa-eng/neis-archive/blob/main/apps-script/SETUP.md" target="_blank" rel="noopener">처음 설정 안내</a>
       </div>
-      <div class="way">
-        <div class="wayhead"><span class="num">2</span><h3>내려받은 JSON 파일 열기</h3><span class="bdg">보조</span></div>
-        <p>휴대폰이나 PC에 <code>neis-y2026-archive.json</code>이 있으면 골라서 열 수 있습니다. 불러온 뒤에도 이 기기 저장소에 담기므로 인터넷 없이 열립니다.</p>
-        <div class="waybtns"><button class="btn" type="button" id="btnSetupFile">JSON 파일 선택</button></div>
-      </div>
-      <p class="mini">연결 주소·데이터는 이 브라우저에만 저장되고 GitHub에는 올라가지 않습니다. 연결 주소를 아는 사람은 데이터를 볼 수 있으니 공유하지 마세요.</p>
     </div>
+    <div class="way">
+      <div class="wayhead"><span class="num">2</span><h3>내려받은 JSON 파일 열기</h3><span class="bdg">보조</span></div>
+      <p>휴대폰이나 PC에 <code>neis-y2026-archive.json</code>이 있으면 골라서 열 수 있습니다. 불러온 뒤에도 이 기기 저장소에 담기므로 인터넷 없이 열립니다.</p>
+      <div class="waybtns"><button class="btn" type="button" id="btnSetupFile">JSON 파일 선택</button></div>
+    </div>
+    <p class="mini">연결 주소·데이터는 이 브라우저에만 저장되고 GitHub에는 올라가지 않습니다. 연결 주소를 아는 사람은 데이터를 볼 수 있으니 공유하지 마세요.</p>
   </section>
 
   <div id="content" hidden>
-    <!-- 요약 -->
-    <section class="panel summary" id="summary">
-      <div class="phead">
-        <h2>📊 한눈에 보기 <span class="hint" id="sumHint"></span></h2>
-        <div class="pheadbtns">
-          <button class="btn sm" type="button" id="btnTop10">1~10월</button>
-          <button class="btn sm" type="button" id="btnSumFold">요약 접기</button>
-        </div>
+
+    <!-- 이달의 흐름 + 지뢰 -->
+    <section class="pb" id="playbook" aria-live="polite"></section>
+
+    <!-- 검색 · 필터 -->
+    <section class="deckbar" id="deckbar">
+      <div class="searchrow">
+        <span class="sic" aria-hidden="true">⌕</span>
+        <input type="search" id="q" placeholder="검색 — 반변경, 학기말종합의견, 주소연계, 정정대장…" autocomplete="off" aria-label="검색">
+        <button class="qclear" type="button" id="btnClearQ" hidden aria-label="검색 지우기">✕</button>
       </div>
-      <div class="sumbar" id="sumbar">
-        <div class="stats" id="stats"></div>
-        <div class="cols">
-          <div>
-            <h3 class="sec">월별 댓글 분포 — 막대를 누르면 그 달만 봅니다</h3>
-            <div class="mbars" id="mbars"></div>
-          </div>
-          <div>
-            <h3 class="sec">주제별 댓글 — 이름을 누르면 그 주제로</h3>
-            <div id="rank"></div>
-          </div>
-        </div>
-        <div class="note-box" id="noteBox"></div>
+      <div class="chips" id="chips" role="group" aria-label="필터"></div>
+      <div class="deckfoot">
+        <span class="count" id="countTxt"></span>
+        <label class="sortwrap">정렬
+          <select id="sortSel">
+            <option value="sev">중요도순</option>
+            <option value="cmt">댓글 많은 순</option>
+            <option value="new">최신순</option>
+          </select>
+        </label>
       </div>
     </section>
 
-    <!-- 맑은샘 하이라이트 -->
-    <section class="panel hlbox" id="hlBox">
-      <div class="phead">
-        <h2>💬 맑은샘 답변 하이라이트 <span class="hint" id="hlHint"></span></h2>
-        <button class="btn sm" type="button" id="btnHL">접기</button>
-      </div>
-      <ul class="hlist" id="hlist"></ul>
-    </section>
+    <div id="cards" class="cards"></div>
+    <section id="searchPanel" hidden></section>
 
-    <!-- 도구 막대 -->
-    <div class="toolbar" id="toolbar">
-      <div class="tb">
-        <span class="lb">월별</span>
-        <div class="mtabs" id="mtabs"></div>
-      </div>
-      <div class="tb">
-        <span class="lb">기간</span>
-        <span class="rngwrap"><select id="mFrom" aria-label="시작 월"></select><span class="tilde">~</span><select id="mTo" aria-label="끝 월"></select></span>
-        <div class="pills" id="presets">
-          <button class="pill on" type="button" data-preset="1-10">전체 1~10월</button>
-          <button class="pill" type="button" data-preset="1-6">1~6월</button>
-          <button class="pill" type="button" data-preset="3-4">3~4월</button>
-          <button class="pill" type="button" data-preset="8-10">8~10월</button>
-        </div>
-        <span class="cnt" id="rng">선택 기간 <b>1~10월</b></span>
-      </div>
-      <div class="tb">
-        <span class="lb">검색</span>
-        <input type="search" id="q" placeholder="제목·본문·댓글 검색 (예: 반변경, 학기말종합의견, 주소연계)" autocomplete="off">
-        <button class="pill" type="button" id="msOnly">맑은샘 답변 포함만</button>
-        <button class="pill" type="button" id="btnClear">조건 초기화</button>
-        <span class="hb-sp"></span>
-        <button class="btn sm" type="button" id="btnAllOpen">전체 펼치기</button>
-        <button class="btn sm" type="button" id="btnAllClose">전체 접기</button>
-      </div>
-    </div>
+    <!-- 그 달 전체 글 -->
+    <section class="foldbox" id="rowsBox"></section>
 
-    <div id="topics"></div>
+    <!-- 주제별 정리 -->
+    <section class="foldbox" id="topicsBox"></section>
 
-    <div class="ftr" id="ftr"></div>
+    <footer class="ftr" id="ftr"></footer>
   </div>
 </main>
 

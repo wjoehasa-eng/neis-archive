@@ -1,4 +1,4 @@
-/* Y공작소 아카이브 · 껍데기 PWA
+/* Y공작소 아카이브 · 2026 나이스 플레이북 (껍데기 PWA)
  * ────────────────────────────────────────────────────────────
  * 이 파일에는 게시글·댓글 등 실제 데이터가 한 줄도 없다.
  * 데이터는 ① 내 비공개 구글 드라이브(Apps Script 연결 주소) 또는
@@ -11,11 +11,15 @@
   var LS_URL = 'na.bridge', LS_KEY = 'na.key', LS_SYNC = 'na.lastSyncMeta';
   var DB_NAME = 'neis-archive', STORE = 'kv', REC = 'archive';
   var AUTO_MS = 30 * 60 * 1000;           // 30분 지나면 조용히 새로 받기
-  var MAX_KB = 60 * 1024;                 // 받는 파일 상한(60MB) — 오작동 방지
+  var MAX_KB = 60 * 1024;                 // 받는 파일 상한(60MB)
 
   var DATA = null, MONTHS = [], BYID = Object.create(null), HAY = new Map();
-  var S = { from: 1, to: 10, q: '', ms: false };
-  var lastMeta = null, syncTimer = null;
+  var CMETA = Object.create(null), CARDS = [], TOPICMETA = Object.create(null);
+  var SEVR = { critical: 3, caution: 2, tip: 1 };
+  var SEVLBL = { critical: '🔴 사고주의', caution: '🟡 예외주의', tip: '🟢 단순팁' };
+  var ROLLBL = { homeroom: '담임', admin: '부장·관리자', all: '공통' };
+  var S = { month: 'all', sev: 'all', role: 'all', ms: false, topic: '', q: '', sort: 'sev' };
+  var lastMeta = null, syncing = false;
 
   window.__naErrors = [];
   window.addEventListener('error', function (e) { window.__naErrors.push(String((e && e.message) || e)); });
@@ -31,13 +35,17 @@
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function num(n) { return (n || 0).toLocaleString('ko-KR'); }
-  function tid(id) { return String(id).replace(/[^0-9]/g, ''); }
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
   function nowText(ts) {
     var d = new Date(ts || Date.now());
     return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' +
       pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
+  function cut(s, n) {
+    s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    return s.length > n ? s.slice(0, n).replace(/[ ,·]$/, '') + '…' : s;
+  }
+  function mLabel(m) { return m && m.length >= 7 ? (+m.slice(5)) + '월' : ''; }
   function toast(msg, isErr) {
     var t = $('#toast');
     t.textContent = msg; t.hidden = false;
@@ -106,11 +114,7 @@
       return body2;
     }, function (err) { clearTimeout(timer); throw err; });
   }
-
-  /** 파일 정보만 받아 온다(작은 응답) — 이미 받은 것과 같으면 3MB를 다시 받지 않는다 */
   function bridgeInfo() { return callBridge({ action: 'info' }, 30000); }
-
-  /** 실제 데이터 받기 */
   function bridgeGet() {
     return callBridge({ action: 'get' }, 120000).then(function (body) {
       var payload = body;
@@ -129,9 +133,7 @@
     var rec = { json: json, savedAt: Date.now(), source: source, built: payload.built_at || '', bytes: json.length };
     if (extra) { rec.driveUpdated = extra.driveUpdated || ''; rec.driveSize = String(extra.driveSize || ''); }
     memRec = rec;
-    if (!idbBroken) {
-      return idbSet(REC, rec).catch(function () { idbBroken = true; });
-    }
+    if (!idbBroken) return idbSet(REC, rec).catch(function () { idbBroken = true; });
     return Promise.resolve();
   }
 
@@ -141,217 +143,130 @@
     var first = !DATA;
     DATA = payload;
     MONTHS = payload.months && payload.months.length ? payload.months : ['2026-01'];
-    if (first) { S.from = 1; S.to = MONTHS.length; }
-    BYID = Object.create(null); HAY = new Map();
+    BYID = Object.create(null); HAY = new Map(); CMETA = Object.create(null);
+    TOPICMETA = Object.create(null); CARDS = [];
     payload.articles.forEach(function (a) { BYID[a.i] = a; });
+    (payload.topics || []).forEach(function (t) { TOPICMETA[t.n] = t; });
+    CMETA = payload.cards || {};
+    Object.keys(CMETA).forEach(function (k) {
+      var a = BYID[+k]; if (!a) return;
+      var m = CMETA[k];
+      CARDS.push({ id: +k, a: a, m: m, topic: a.p || '' });
+    });
+    CARDS.sort(cardOrder);
     lastMeta = meta || null;
 
-    renderHero();
-    renderSummary();
-    renderToolbarMonths();
-    renderTopics();
-    renderHighlight();
+    if (first) { S.month = 'all'; }
+    if (S.month !== 'all' && MONTHS.indexOf(S.month) < 0) S.month = 'all';
+    S.q = ''; var qi = $('#q'); if (qi) qi.value = '';
+
+    renderShell();
     $('#setupPanel').hidden = true;
     $('#content').hidden = false;
-    applyFilter();
+    renderAll();
     setState((meta && meta.savedAt ? '불러옴 ' + nowText(meta.savedAt) + ' · ' : '') +
       (meta && meta.source === 'file' ? '내 JSON 파일' : '드라이브'), 'ok');
-    window.__naState = {
-      articles: payload.articles.length, cards: $$('#topics .card').length,
-      topics: $$('#topics .topic').length, built: payload.built_at,
-      visible: $$('#topics .card:not(.hide)').length
-    };
   }
 
-  function renderHero() {
-    var s = DATA.source || {};
-    $('#appTitle').textContent = DATA.title || 'Y공작소 이슈 아카이브';
-    $('#heroSub').textContent = (s.months || '') + ' · 본문 ' + num(s.articles) + '건과 댓글 ' + num(s.comments) +
-      '건을 주제별로 정리했습니다.';
-    var chips = $('#chips');
-    chips.innerHTML =
-      '<span>본문 <b>' + num(s.articles) + '</b>건</span>' +
-      '<span>댓글 <b>' + num(s.comments) + '</b>건</span>' +
-      '<span>주제 <b>' + num(s.topics) + '</b></span>' +
-      '<span>맑은샘 답변 <b>' + num(s.ms_articles) + '</b>글 / <b>' + num(s.ms_comments) + '</b>댓글</span>' +
-      '<span>데이터 기준 <b>' + esc(DATA.built_at || '') + '</b></span>';
-    chips.hidden = false;
+  function cardOrder(x, y) {
+    return (SEVR[y.m.sv] || 0) - (SEVR[x.m.sv] || 0) || (y.a.n - x.a.n) || (y.a.i - x.a.i);
   }
 
-  function renderSummary() {
-    var s = DATA.source || {};
-    var st = [
-      ['전체 메타데이터', num(s.meta_total), '(1~10월 수집 모집단)'],
-      ['정밀 수집 글', num(s.articles), '본문·댓글 직접 수집'],
-      ['댓글', num(s.comments), '원문 그대로'],
-      ['대표 질문 카드', num(s.cards), '정리 + 근거 댓글'],
-      ['맑은샘 답변 글', num(s.ms_articles), '댓글 ' + num(s.ms_comments) + '개'],
-      ['주제', num(s.topics), '주제별 넘기기']
-    ];
-    $('#stats').innerHTML = st.map(function (x) {
-      return '<div class="stat"><b>' + x[1] + '</b><span>' + esc(x[0]) + '</span><em style="font-size:10.5px">' + esc(x[2]) + '</em></div>';
-    }).join('');
+  function topicColor(name) { var t = TOPICMETA[name]; return (t && t.c) || '#9aa0ac'; }
 
-    var mc = DATA.month_comments || {}, mx = 1;
-    MONTHS.forEach(function (m) { mx = Math.max(mx, mc[m] || 0); });
-    $('#mbars').innerHTML = MONTHS.map(function (m) {
-      var v = mc[m] || 0, h = Math.max(4, Math.round(v / mx * 70));
-      return '<div data-m="' + m + '" title="' + m.slice(5) + '월 댓글 ' + num(v) + '"><i style="height:' + h + 'px"></i><b>' + (+m.slice(5)) + '월</b></div>';
-    }).join('');
-
-    var tp = (DATA.topics || []).slice().sort(function (a, b) { return b.st.c - a.st.c; });
-    var mxc = Math.max.apply(null, tp.map(function (t) { return t.st.c; }).concat([1]));
-    $('#rank').innerHTML = tp.map(function (t) {
-      return '<div class="rk"><span class="nm" data-topic="' + esc(t.n) + '">' + esc(t.n) + '</span>' +
-        '<span class="bar"><i style="width:' + Math.round(t.st.c / mxc * 100) + '%;background:' + esc(t.c) + '"></i></span>' +
-        '<span class="vl">글 ' + t.st.n + ' · 댓글 ' + num(t.st.c) + '</span></div>';
-    }).join('');
-
-    $('#noteBox').innerHTML = '<b>수집 범위 안내</b> · 전체 ' + num(s.meta_total) + '건 중 <b>' + num(s.articles) +
-      '건</b>은 월별·게시판 균형을 맞춰 댓글·좋아요가 많은 글을 골라 본문과 댓글을 직접 수집한 것입니다. ' +
-      '대표 질문 카드는 그중 근거가 분명한 글을 골라 정리한 것이고, 확인되지 않은 사안은 단정하지 않고 <b>⚠ 의견 갈림</b>으로 표시했습니다. ' +
-      '이 앱은 GitHub Pages의 껍데기이고, 실제 데이터는 내 비공개 드라이브에서만 받아 옵니다.';
-    $('#sumHint').textContent = '기간 ' + rangeLabel();
+  /* ── 셸(정적 영역) ────────────────────────────────────── */
+  function renderShell() {
+    renderMonths();
+    renderPlaybook();
+    renderRows();
+    renderTopics();
+    renderFooter();
   }
 
-  function renderToolbarMonths() {
-    var cnt = DATA.month_counts || {};
-    $('#mtabs').innerHTML = MONTHS.map(function (m) {
-      return '<button class="mtab" type="button" data-m="' + m + '">' + (+m.slice(5)) + '월<b>' + (cnt[m] || 0) + '</b></button>';
-    }).join('');
-    $('#mFrom').innerHTML = MONTHS.map(function (m, i) {
-      return '<option value="' + (i + 1) + '">' + (+m.slice(5)) + '월</option>';
-    }).join('');
-    $('#mTo').innerHTML = MONTHS.map(function (m, i) {
-      return '<option value="' + (i + 1) + '"' + (i === MONTHS.length - 1 ? ' selected' : '') + '>' + (+m.slice(5)) + '월</option>';
-    }).join('');
-    $('#mFrom').value = S.from; $('#mTo').value = S.to;
-    markMonth();
+  function renderMonths() {
+    var counts = Object.create(null);
+    CARDS.forEach(function (c) { counts[c.a.m] = (counts[c.a.m] || 0) + 1; });
+    var html = ['<div class="mstrip-in">'];
+    html.push('<button class="mbtn all' + (S.month === 'all' ? ' on' : '') + '" type="button" data-m="all">' +
+      '<b>전체</b><span>카드 ' + CARDS.length + '</span></button>');
+    MONTHS.forEach(function (m) {
+      html.push('<button class="mbtn' + (S.month === m ? ' on' : '') + '" type="button" data-m="' + m + '"' +
+        ' title="' + m.slice(5) + '월 · 글 ' + num((DATA.month_counts || {})[m] || 0) + '건 · 카드 ' + (counts[m] || 0) + '장">' +
+        '<b>' + (+m.slice(5)) + '월</b><span>' + (counts[m] || 0) + '</span></button>');
+    });
+    html.push('</div>');
+    $('#mstrip').innerHTML = html.join('');
   }
 
-  function renderTopics() {
-    var html = (DATA.topics || []).map(function (t) {
-      var rows = DATA.articles.filter(function (a) { return a.p === t.n; })
-        .sort(function (a, b) { return (b.n - a.n) || (b.l - a.l) || (b.i - a.i); });
-      var faq = (t.faq || []).map(function (id) { return BYID[id]; }).filter(Boolean);
-      var mxm = Math.max.apply(null, MONTHS.map(function (m) { return t.st.months[m] || 0; }).concat([1]));
-      var spark = MONTHS.map(function (m) {
-        return '<i style="height:' + Math.max(2, Math.round((t.st.months[m] || 0) / mxm * 16)) + 'px"></i>';
+  function renderPlaybook() {
+    var box = $('#playbook');
+    if (S.month === 'all') { box.innerHTML = yearHtml(); return; }
+    var pb = (DATA.monthlyPlaybooks || {})[S.month];
+    if (!pb) {
+      box.innerHTML = '<div class="pb-head"><div class="pb-kick">' + esc(mLabel(S.month)) + ' 업무 흐름</div>' +
+        '<h1>이 달의 플레이북이 아직 없습니다</h1><p class="pb-sum">데이터 양식이 예전 것입니다 — 위의 <b>동기화</b>를 눌러 새 플레이북 데이터를 받아 주세요.</p></div>';
+      return;
+    }
+    var steps = pb.steps.map(function (s, i) {
+      var chips = (s[2] || []).map(function (id) {
+        var a = BYID[id]; if (!a) return '';
+        return '<button class="mini-chip" type="button" data-jump="' + id + '" title="' + esc(a.t) + '">' + esc(cut(a.t, 26)) + '</button>';
       }).join('');
-      return '<section class="topic" data-topic="' + esc(t.n) + '" id="tp' + hashName(t.n) + '">' +
-        '<div class="thead" role="button" tabindex="0" aria-expanded="true">' +
-        '<span class="dot" style="background:' + esc(t.c) + '"></span>' +
-        '<h2>' + esc(t.n) + '</h2>' +
-        '<span class="tmeta"><span class="bdg">글 <b>' + t.st.n + '</b></span>' +
-        '<span class="bdg cmt">댓글 <b>' + num(t.st.c) + '</b></span>' +
-        '<span class="bdg ms">맑은샘 <b>' + t.st.ms + '</b></span>' +
-        '<span class="bdg like">♥ ' + t.st.like + '</span></span>' +
-        '<span class="sp"></span>' +
-        '<span class="mspark" aria-hidden="true" style="display:inline-flex;gap:2px;align-items:flex-end;height:18px">' + spark + '</span>' +
-        '<button class="toggle" type="button" aria-label="접기/펼치기">접기</button></div>' +
-        '<div class="tbody">' +
-        '<p class="lead">' + esc(t.lead || '') + '</p>' +
-        (t.points && t.points.length ? '<ul class="points">' + t.points.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' : '') +
-        (t.warn ? '<div class="warn"><b>⚠️ 의견 갈림 · 추가 확인 필요</b> — ' + esc(t.warn) + '</div>' : '') +
-        '<div class="lhead" data-role="faqhead"><h4>대표 질문과 답변</h4><span class="n" data-role="fcount">' + faq.length + '건 · 댓글 원문 인용</span></div>' +
-        '<div class="faqs" data-role="faqs">' + faq.map(cardHtml).join('') + '</div>' +
-        '<div class="lhead"><h4>원문 글 전체</h4><span class="n" data-role="tcount">' + rows.length + '건</span>' +
-        '<select class="sortsel" aria-label="정렬"><option value="cmt">댓글 많은 순</option><option value="new">최신순</option><option value="like">좋아요 순</option></select></div>' +
-        '<div class="rows" data-role="rows">' + rows.map(rowHtml).join('') + '</div>' +
-        '<div class="empty" data-role="empty" hidden>이 범위에 해당하는 글이 없습니다.</div>' +
-        '</div></section>';
+      return '<li class="step"><div class="step-top"><span class="step-no">' + (i + 1) + '</span><span class="step-line"></span></div>' +
+        '<h3>' + esc(s[0]) + '</h3><p>' + esc(s[1]) + '</p>' +
+        (chips ? '<div class="step-cards">' + chips + '</div>' : '') + '</li>';
     }).join('');
-    $('#topics').innerHTML = html;
-    $('#ftr').innerHTML = 'Y공작소 아카이브 · 본문 ' + num(DATA.articles.length) + '건 / 댓글 ' +
-      num(DATA.articles.reduce(function (s, a) { return s + a.n; }, 0)) + '건 · 데이터는 내 구글 드라이브에만 있습니다.';
-  }
-
-  function hashName(s) {
-    var h = 0; for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
-    return Math.abs(h).toString(36);
-  }
-
-  function cardHtml(a) {
-    if (!a) return '';
-    var isData = /업무자료공유|연수물자료공유|업무관련 매뉴얼|생활기록부 훈령/.test(a.b);
-    var badges = '';
-    if (a.s) badges += '<span class="tg ms">맑은샘 답변글</span>';
-    (a.g || []).forEach(function (t) { badges += '<span class="tg">' + esc(t) + '</span>'; });
-    var body = String(a.bd || '').replace(/\s+/g, ' ').trim();
-    var cut = isData ? 420 : 320;
-    if (body.length > cut) body = body.slice(0, cut) + ' …';
-    var ans = '';
-    if (a.x) ans += '<p class="anote">' + esc(a.x.length > 520 ? a.x.slice(0, 520) + ' …' : a.x) + '</p>';
-    if (a.bc && (a.bc.ms || !isData)) {
-      ans += '<div class="aquote' + (a.bc.ms ? '' : ' gen') + '"><span class="who">원문 댓글 · ' +
-        esc(a.bc.n) + ' (' + esc(a.bc.d) + ')</span>' + esc(a.bc.c) + '</div>';
-    }
-    var ah = '';
-    if (ans) ah = (isData && !a.x) ? '<span class="ah gen">공유 자료 · 본문 참고</span>' :
-      (a.x ? '<span class="ah">정리 + 근거 댓글</span>' : '<span class="ah gen">원문 댓글</span>');
-    else {
-      ans = body.length > 180
-        ? '<p class="anote">본문에 정리된 내용을 그대로 참고하세요. 아래 원문에서 댓글 반응까지 확인할 수 있습니다.</p>'
-        : '<p class="anote">댓글에서 확정된 답을 찾지 못했습니다. 원문 댓글을 직접 확인하세요.</p>';
-      ah = '<span class="ah gen">본문 참고</span>';
-    }
-    return '<article class="card" data-id="' + a.i + '">' +
-      '<div class="q"><div class="qtop"><span class="qid">' + a.i + '</span>' +
-      '<span class="qdate">' + esc(String(a.d).slice(0, 10)) + ' · ' + esc(a.b) + '</span>' +
-      '<span class="bdg cmt">댓글 ' + a.n + '</span>' + (a.l ? '<span class="bdg like">♥ ' + a.l + '</span>' : '') + '</div>' +
-      '<h5 class="qtitle"><a href="' + esc(a.u) + '" target="_blank" rel="noopener">' + esc(a.t) + '</a></h5>' +
-      '<p class="qbody">' + esc(body) + '</p></div>' +
-      '<div class="a">' + ah + ans +
-      '<div class="foot"><a class="lnk" href="' + esc(a.u) + '" target="_blank" rel="noopener">카페 원문 열기 →</a>' +
-      '<span class="tags">' + badges + '</span></div></div></article>';
-  }
-
-  function rowHtml(a) {
-    var note = a.x ? '<div class="nt">' + esc(a.x.length > 190 ? a.x.slice(0, 190) + ' …' : a.x) + '</div>' : '';
-    return '<details class="row" data-id="' + a.i + '" data-m="' + esc(a.m) + '" data-s="' + (a.s ? 1 : 0) +
-      '" data-cmt="' + (a.n || 0) + '" data-like="' + (a.l || 0) + '" data-d="' + esc(a.d) + '">' +
-      '<summary><span class="dt">' + esc(String(a.d).slice(5, 10).replace('-', '.')) + '</span>' +
-      '<span class="bd">' + esc(a.b) + '</span>' +
-      '<span class="tx"><span class="ti">' + esc(a.t) + '</span>' + note + '</span>' +
-      '<span class="mt">' + (a.s ? '<span class="ms">맑은샘</span>' : '') + (a.pa ? '<span class="pt" title="첫 10개 댓글만 보관">일부</span>' : '') +
-      '<span>💬' + (a.n || 0) + '</span>' + (a.l ? '<span>♥' + a.l + '</span>' : '') + '</span></summary></details>';
-  }
-
-  function detailHtml(a) {
-    var h = '<div class="detail">';
-    if (a.x) h += '<p class="anote">' + esc(a.x) + '</p>';
-    if (a.bd) h += '<p class="bdtext">' + esc(a.bd) + '</p>';
-    if (a.pa) h += '<p class="mini-note">※ 이 글은 첫 10개 댓글만 보관되어 있습니다.</p>';
-    if (a.cm && a.cm.length) {
-      h += a.cm.map(function (c) {
-        return '<div class="cm' + (c.n === '맑은샘' ? ' best' : '') + '">' +
-          '<span class="who">' + esc(c.n) + '</span><span class="cdate">' + esc(c.d) + '</span>' +
-          (c.r ? '<span class="rp">답글</span>' : '') + '<div>' + esc(c.c) + '</div></div>';
-      }).join('');
-    } else {
-      h += '<p class="mini-note">보관된 댓글이 없습니다.</p>';
-    }
-    h += '<a class="dlink" href="' + esc(a.u) + '" target="_blank" rel="noopener">카페 원문 열기 →</a></div>';
-    return h;
-  }
-
-  function renderHighlight() {
-    var ms = DATA.articles.filter(function (a) { return a.s; })
-      .sort(function (a, b) { return (b.n - a.n) || (b.l - a.l); }).slice(0, 14);
-    $('#hlist').innerHTML = ms.map(function (a) {
-      var t = a.x || (a.bc && a.bc.c) || '';
-      if (t.length > 150) t = t.slice(0, 150) + ' …';
-      return '<li class="hl" data-id="' + a.i + '"><a data-open="' + a.i + '">' +
-        '<span class="hlq">' + esc(a.t) + '</span>' +
-        '<span class="hlm">' + esc(String(a.d).slice(0, 10)) + ' · ' + esc(a.b) + ' · 댓글 ' + a.n + '</span>' +
-        '<span class="hla">' + esc(t) + '</span></a></li>';
+    var mines = pb.pitfalls.map(function (p) {
+      var id = (p[2] || [])[0];
+      var a = id ? BYID[id] : null;
+      return '<li><div><b>' + esc(p[0]) + '</b><span>' + esc(p[1]) + '</span></div>' +
+        (a ? '<button class="mini-chip" type="button" data-jump="' + id + '">카드</button>' : '<span></span>') + '</li>';
     }).join('');
-    $('#hlHint').textContent = '답변이 달린 글 ' + num(DATA.source.ms_articles) + '건 중 댓글 많은 ' + ms.length + '건';
+    box.innerHTML =
+      '<div class="pb-head">' +
+      '<div class="pb-kick">' + esc(mLabel(S.month)) + ' 업무 흐름 · 2026</div>' +
+      '<h1><small>' + esc(mLabel(S.month)) + '에 할 일</small>' + esc(pb.label) + '</h1>' +
+      '<p class="pb-sum">' + esc(pb.summary) + '</p></div>' +
+      '<ol class="flow">' + steps + '</ol>' +
+      '<div class="mines"><div class="mines-h"><span class="mines-ic">⚠️</span><div>' +
+      '<b>이달의 지뢰 ' + pb.pitfalls.length + '</b><em>여기서 미끄러지면 복구가 어렵거나 일이 두 배가 됩니다</em></div></div>' +
+      '<ul>' + mines + '</ul></div>';
   }
 
-  /* ── 필터 ────────────────────────────────────────────── */
-  function monthIdx(m) { var i = MONTHS.indexOf(m); return i < 0 ? 0 : i + 1; }
-  function inRange(a) { var i = monthIdx(a.m); return i >= S.from && i <= S.to; }
+  function yearHtml() {
+    var items = MONTHS.map(function (m) {
+      var pb = (DATA.monthlyPlaybooks || {})[m];
+      if (!pb) return '';
+      return '<li><button class="ym" type="button" data-m="' + m + '">' +
+        '<b>' + (+m.slice(5)) + '월</b>' +
+        '<span class="yt">' + esc(pb.label) + '</span>' +
+        '<span class="yd">' + esc(cut(pb.summary, 62)) + '</span>' +
+        '<span class="yb"><span class="ytag">흐름 ' + pb.steps.length + '단계</span>' +
+        '<span class="ytag">지뢰 ' + pb.pitfalls.length + '</span></span></button></li>';
+    }).join('');
+    if (!items) {
+      return '<div class="pb-head"><div class="pb-kick">2026 한 해 업무 흐름</div>' +
+        '<h1>플레이북 데이터를 기다리는 중입니다</h1><p class="pb-sum">데이터 양식이 예전 것입니다 — 위의 <b>동기화</b>를 눌러 새 플레이북 데이터를 받아 주세요.</p></div>';
+    }
+    var s = DATA.source || {};
+    return '<div class="pb-head"><div class="pb-kick">2026 한 해 업무 흐름</div>' +
+      '<h1><small>1월부터 10월까지</small>달을 고르면 그 달의 순서와 지뢰가 먼저 보입니다</h1>' +
+      '<p class="pb-sum">본문 ' + num(s.articles) + '건 · 댓글 ' + num(s.comments) + '건에서 뽑은 대표 질문 ' +
+      num(CARDS.length) + '장을 경중(🔴 사고주의 / 🟡 예외주의 / 🟢 단순팁)으로 나눴습니다. ' +
+      '아래 10개 월 카드를 누르면 그 달의 업무 순서와 지뢰부터 보여 줍니다.</p></div>' +
+      '<ol class="yearflow">' + items + '</ol>';
+  }
+
+  function renderFooter() {
+    var s = DATA.source || {};
+    $('#ftr').innerHTML = 'Y공작소 아카이브 · 본문 ' + num(s.articles) + '건 / 댓글 ' + num(s.comments) +
+      '건 · 대표 질문 카드 ' + num(CARDS.length) + '장 · 데이터 기준 ' + esc(DATA.built_at || '') +
+      '<br>이 앱(GitHub Pages)에는 데이터가 없고, 내 구글 드라이브의 비공개 파일에서 이 기기로만 받아 옵니다. ' +
+      '카드의 1줄 결론과 지뢰 표시는 원문 글·댓글을 근거로 정리한 것이며, 확인되지 않은 사안은 예외로 표시했습니다.';
+  }
+
+  /* ── 필터 계산 ────────────────────────────────────────── */
+  function inMonth(c) { return S.month === 'all' || c.a.m === S.month; }
   function hay(a) {
     var v = HAY.get(a.i);
     if (v) return v;
@@ -359,82 +274,271 @@
       (a.cm || []).map(function (c) { return c.c; }).join(' ')).toLowerCase();
     HAY.set(a.i, v); return v;
   }
-  function matches(a, q) {
-    if (!inRange(a)) return false;
-    if (S.ms && !a.s) return false;
-    if (!q) return true;
-    return hay(a).indexOf(q) >= 0;
+  function roleOk(c) {
+    if (S.role === 'all') return true;
+    return c.m.r === S.role || c.m.r === 'all';
   }
-  function rangeLabel() { return S.from === S.to ? S.from + '월' : S.from + '~' + S.to + '월'; }
+  function deckBase() {
+    return CARDS.filter(function (c) {
+      return inMonth(c) && (!S.topic || c.topic === S.topic) && (!S.ms || c.a.s);
+    });
+  }
 
-  function applyFilter() {
+  function renderChips() {
+    var base = deckBase();
+    var n = { all: base.length, critical: 0, caution: 0, tip: 0, homeroom: 0, admin: 0 };
+    base.forEach(function (c) {
+      n[c.m.sv] = (n[c.m.sv] || 0) + 1;
+      if (c.m.r === 'homeroom' || c.m.r === 'all') n.homeroom++;
+      if (c.m.r === 'admin' || c.m.r === 'all') n.admin++;
+    });
+    var c = function (key, cls, label, cnt, on) {
+      return '<button class="chip ' + cls + (on ? ' on' : '') + '" type="button" data-sev="' + key + '">' +
+        label + '<span class="n">' + cnt + '</span></button>';
+    };
+    var h = [];
+    h.push(c('all', '', '전체', n.all, S.sev === 'all'));
+    h.push(c('critical', 'c-crit', '🔴 사고주의', n.critical, S.sev === 'critical'));
+    h.push(c('caution', 'c-warn', '🟡 예외주의', n.caution, S.sev === 'caution'));
+    h.push(c('tip', 'c-tip', '🟢 단순팁', n.tip, S.sev === 'tip'));
+    h.push('<span class="chip-sep"></span>');
+    h.push('<button class="chip' + (S.role === 'homeroom' ? ' on' : '') + '" type="button" data-role="homeroom">담임<span class="n">' + n.homeroom + '</span></button>');
+    h.push('<button class="chip' + (S.role === 'admin' ? ' on' : '') + '" type="button" data-role="admin">부장·관리자<span class="n">' + n.admin + '</span></button>');
+    h.push('<button class="chip' + (S.ms ? ' on' : '') + '" type="button" data-ms="1">맑은샘 답변</button>');
+    if (S.topic) {
+      h.push('<button class="chip on" type="button" data-topicclear="1">주제 · ' + esc(cut(S.topic, 14)) + ' ✕</button>');
+    }
+    $('#chips').innerHTML = h.join('');
+  }
+
+  /* ── 카드 ─────────────────────────────────────────────── */
+  function visibleCards() {
+    var list = deckBase().filter(function (c) {
+      return (S.sev === 'all' || c.m.sv === S.sev) && roleOk(c);
+    });
+    if (S.sort === 'cmt') list.sort(function (x, y) { return y.a.n - x.a.n || cardOrder(x, y); });
+    else if (S.sort === 'new') list.sort(function (x, y) { return x.a.d < y.a.d ? 1 : x.a.d > y.a.d ? -1 : cardOrder(x, y); });
+    else list.sort(cardOrder);
+    return list;
+  }
+
+  function cardSrcHtml(a) {
+    var src = '';
+    if (a.x) src += '<div class="note"><b>정리</b>' + esc(a.x) + '</div>';
+    if (a.bc) {
+      src += '<div class="quote' + (a.bc.ms ? ' ms' : '') + '"><span class="who">' +
+        (a.bc.ms ? '맑은샘 답변' : '댓글') + ' · ' + esc(a.bc.n || '') + ' (' + esc(a.bc.d || '') + ')</span>' +
+        esc(a.bc.c) + '</div>';
+    }
+    if (a.bd) {
+      src += '<div class="note"><b>원문 글</b><div class="qbody">' + esc(cut(a.bd, 900)) + '</div></div>';
+    }
+    if (!src) src = '<p class="mini-note">보관된 원문 요약이 없습니다. 카페 원문에서 확인하세요.</p>';
+    src += '<div><a class="srclink" href="' + esc(a.u) + '" target="_blank" rel="noopener">카페 원문 열기 →</a></div>';
+    return '<div class="srcbody">' + src + '</div>';
+  }
+
+  function cardHtml(c) {
+    var a = c.a, m = c.m;
+    var tags = '<span class="sev sev-' + m.sv + '">' + SEVLBL[m.sv] + '</span>' +
+      '<span class="tg">' + ROLLBL[m.r] + '</span>' +
+      (m.g === 'gyeonggi' ? '<span class="tg reg-g">경기 기준</span>' : '') +
+      (a.s ? '<span class="tg ms">맑은샘 답변</span>' : '') +
+      '<span class="tg topic" title="' + esc(c.topic) + '">' + esc(cut(c.topic, 18)) + '</span>';
+    return '<article class="card sev-' + m.sv + '" data-id="' + a.i + '">' +
+      '<div class="ctags">' + tags + '</div>' +
+      '<h3 class="cq"><a href="' + esc(a.u) + '" target="_blank" rel="noopener">' + esc(a.t) + '</a></h3>' +
+      '<p class="one">' + esc(m.one) + '</p>' +
+      (m.ex ? '<p class="ex"><b>예외</b>' + esc(m.ex) + '</p>' : '') +
+      '<div class="cmeta"><span>' + esc(mLabel(a.m)) + ' ' + esc(String(a.d).slice(0, 10)) + '</span><span class="dot"></span>' +
+      '<span>댓글 ' + num(a.n) + '</span>' + (a.l ? '<span class="dot"></span><span>♥ ' + num(a.l) + '</span>' : '') +
+      '<span class="dot"></span><span>' + esc(a.b) + '</span></div>' +
+      '<details class="src"><summary>근거 글·댓글 ' + num(a.n) + '개 보기</summary></details>' +
+      '</article>';
+  }
+
+  function renderDeck() {
     if (!DATA) return;
+    renderChips();
     var q = S.q.trim().toLowerCase();
-    var vis = Object.create(null), cmSum = 0, cnt = 0;
-    DATA.articles.forEach(function (a) {
-      if (matches(a, q)) { vis[a.i] = 1; cnt++; cmSum += a.n || 0; }
-    });
-    $$('#topics section.topic').forEach(function (sec) {
-      var vc = 0, vr = 0;
-      $$('.card', sec).forEach(function (el) {
-        var ok = !!vis[+el.dataset.id];
-        el.classList.toggle('hide', !ok); if (ok) vc++;
-      });
-      $$('.row', sec).forEach(function (el) {
-        var ok = !!vis[+el.dataset.id];
-        el.classList.toggle('hide', !ok); if (ok) vr += BYID[+el.dataset.id].n || 0;
-      });
-      var fc = $('[data-role=fcount]', sec);
-      if (fc) fc.textContent = vc + '건 · 댓글 원문 인용';
-      var fh = $('[data-role=faqhead]', sec), fb = $('[data-role=faqs]', sec);
-      if (fh) fh.style.display = vc ? '' : 'none';
-      if (fb) fb.style.display = vc ? '' : 'none';
-      var tc = $('[data-role=tcount]', sec);
-      if (tc) tc.textContent = vr ? num(vr) + '건' : '0건';
-      var em = $('[data-role=empty]', sec);
-      if (em) em.hidden = vr > 0;
-    });
-    $$('#hlist .hl').forEach(function (el) { el.classList.toggle('hide', !vis[+el.dataset.id]); });
-    $('#rng').innerHTML = '선택 기간 <b>' + rangeLabel() + '</b> · 글 <b>' + num(cnt) + '</b>건 · 댓글 <b>' + num(cmSum) + '</b>건';
-    $('#sumHint').textContent = '기간 ' + rangeLabel();
-    markMonth();
-    markPreset();
+    var searching = !!q;
+    $('#cards').hidden = searching;
+    $('#searchPanel').hidden = !searching;
+    $('#rowsBox').hidden = searching;
+    $('#topicsBox').hidden = searching;
+    $('#btnClearQ').hidden = !q;
+    if (searching) { renderSearch(q); return; }
+    var list = visibleCards();
+    $('#cards').innerHTML = list.length ? list.map(cardHtml).join('') :
+      '<div class="empty">이 조건에 맞는 카드가 없습니다. 필터를 풀어 보세요.</div>';
+    var monthArts = S.month === 'all' ? DATA.articles.length :
+      DATA.articles.filter(function (a) { return a.m === S.month; }).length;
+    $('#countTxt').innerHTML = '카드 <b>' + num(list.length) + '</b>장' +
+      (S.month === 'all' ? ' · 전체 ' + num(monthArts) + '건' : ' · ' + esc(mLabel(S.month)) + ' 글 ' + num(monthArts) + '건');
+    window.__naState = {
+      articles: DATA.articles.length, cards: CARDS.length, rendered: list.length,
+      topics: (DATA.topics || []).length, built: DATA.built_at, month: S.month, mode: 'deck'
+    };
   }
 
-  function markMonth() {
-    $$('#mtabs .mtab').forEach(function (b) {
-      var i = MONTHS.indexOf(b.dataset.m) + 1;
-      b.classList.toggle('on', S.from === i && S.to === i);
-    });
-    var f = $('#mFrom'), t = $('#mTo');
-    if (f) f.value = S.from;
-    if (t) t.value = S.to;
+  /* ── 검색 결과 ─────────────────────────────────────────── */
+  var searchLimit = 40, searchHits = [];
+  function renderSearch(q) {
+    searchHits = DATA.articles.filter(function (a) { return hay(a).indexOf(q) >= 0; })
+      .sort(function (x, y) {
+        var cx = CMETA[x.i] ? 2 : 0, cy = CMETA[y.i] ? 2 : 0;
+        return (cy - cx) || (y.n - x.n) || (y.i - x.i);
+      });
+    var show = searchHits.slice(0, searchLimit);
+    var h = ['<div class="shead"><h2>“' + esc(S.q.trim()) + '” 검색 결과</h2>' +
+      '<span class="n">' + num(searchHits.length) + '건 · 카드 먼저, 댓글 많은 순</span></div>'];
+    if (!searchHits.length) {
+      h.push('<div class="empty">찾는 내용이 없습니다. 짧은 낱말로 다시 검색해 보세요 (예: 반변경, 생기부, 권한).</div>');
+    } else {
+      h.push('<div class="foldbody" style="padding:0">' + show.map(rowHtml).join('') + '</div>');
+      if (searchHits.length > show.length) {
+        h.push('<button class="btn small morebtn" type="button" id="btnMoreHit">더 보기 (' +
+          (searchHits.length - show.length) + '건)</button>');
+      }
+    }
+    $('#searchPanel').innerHTML = h.join('');
+    $('#countTxt').innerHTML = '검색 <b>' + num(searchHits.length) + '</b>건';
+    window.__naState = {
+      articles: DATA.articles.length, cards: CARDS.length, topics: (DATA.topics || []).length,
+      built: DATA.built_at, month: S.month, mode: 'search', hits: searchHits.length
+    };
   }
-  function markPreset() {
-    $$('#presets .pill').forEach(function (p) {
-      var r = p.dataset.preset.split('-').map(Number);
-      p.classList.toggle('on', r[0] === S.from && r[1] === S.to);
-    });
+
+  /* ── 원문 글 목록 ──────────────────────────────────────── */
+  function rowsOfMonth() {
+    return DATA.articles.filter(function (a) { return S.month === 'all' || a.m === S.month; })
+      .sort(function (x, y) { return (y.n - x.n) || (y.i - x.i); });
   }
-  function setRange(f, t, opts) {
-    f = Math.max(1, Math.min(MONTHS.length, f));
-    t = Math.max(1, Math.min(MONTHS.length, t));
-    if (f > t) { var x = f; f = t; t = x; }
-    S.from = f; S.to = t;
-    applyFilter();
-    if (opts && opts.scrollTop) window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  function rowHtml(a) {
+    var note = a.x ? '<span class="rn">' + esc(cut(a.x, 150)) + '</span>' :
+      (a.bc ? '<span class="rn">' + esc(cut(a.bc.c, 150)) + '</span>' : '');
+    return '<details class="row" data-id="' + a.i + '">' +
+      '<summary><span class="rd">' + esc(mLabel(a.m)) + ' ' + esc(String(a.d).slice(8, 10)) + '일</span>' +
+      '<span class="rt"><span class="rb">' + esc(cut(a.p || a.b, 16)) + '</span> ' + esc(a.t) + note + '</span>' +
+      '<span class="rm">' + (a.s ? '<span class="ms">맑은샘</span>' : '') +
+      (a.pa ? '<span class="pt" title="첫 10개 댓글만 보관">일부</span>' : '') +
+      '<span>💬' + num(a.n) + '</span>' + (a.l ? '<span>♥' + num(a.l) + '</span>' : '') + '</span></summary>' +
+      '</details>';
+  }
+
+  function renderRows() {
+    var box = $('#rowsBox');
+    if (!box) return;
+    if (S.month === 'all') {
+      var per = Object.create(null);
+      DATA.articles.forEach(function (a) { per[a.m] = (per[a.m] || 0) + 1; });
+      box.innerHTML = '<details class="fold"><summary><h2>월별 원문 글</h2>' +
+        '<span class="n">전체 ' + num(DATA.articles.length) + '건 · 월을 고르면 그 달 글 목록이 열립니다</span></summary>' +
+        '<div class="foldbody"><div class="chips" style="padding:10px 0">' +
+        MONTHS.map(function (m) {
+          return '<button class="chip" type="button" data-m="' + m + '">' + (+m.slice(5)) + '월<span class="n">' +
+            num(per[m] || 0) + '</span></button>';
+        }).join('') + '</div></div></details>';
+      return;
+    }
+    var rows = rowsOfMonth();
+    box.innerHTML = '<details class="fold"><summary><h2>' + esc(mLabel(S.month)) + ' 원문 글 전체</h2>' +
+      '<span class="n">' + num(rows.length) + '건 · 댓글 ' +
+      num(rows.reduce(function (s, a) { return s + (a.n || 0); }, 0)) + '개</span></summary>' +
+      '<div class="foldbody">' + rows.map(rowHtml).join('') + '</div></details>';
+  }
+
+  function detailHtml(a) {
+    var h = ['<div class="detail">'];
+    var m = CMETA[a.i];
+    if (m) h.push('<div class="onetag">' + SEVLBL[m.sv] + ' · ' + esc(m.one) + '</div>');
+    if (a.x) h.push('<div class="note"><b>정리</b>' + esc(a.x) + '</div>');
+    if (a.bd) h.push('<div class="note"><b>원문 글</b><div class="qbody" style="max-height:none">' + esc(a.bd) + '</div></div>');
+    if (a.pa) h.push('<p class="mini-note">※ 이 글은 첫 10개 댓글만 보관되어 있습니다.</p>');
+    if (a.cm && a.cm.length) {
+      h.push(a.cm.map(function (c) {
+        return '<div class="cm' + (c.n === '맑은샘' ? ' best' : '') + '">' +
+          '<span class="who">' + esc(c.n) + '</span><span class="cdate">' + esc(c.d) + '</span>' +
+          (c.r ? ' <span class="mini-note">답글</span>' : '') + '<div>' + esc(c.c) + '</div></div>';
+      }).join(''));
+    } else {
+      h.push('<p class="mini-note">보관된 댓글이 없습니다.</p>');
+    }
+    h.push('<div><a class="srclink" href="' + esc(a.u) + '" target="_blank" rel="noopener">카페 원문 열기 →</a></div></div>');
+    return h.join('');
+  }
+
+  /* ── 주제별 정리 ──────────────────────────────────────── */
+  function renderTopics() {
+    var box = $('#topicsBox');
+    if (!box) return;
+    var items = (DATA.topics || []).map(function (t) {
+      var n = CARDS.filter(function (c) { return c.topic === t.n; }).length;
+      var bySev = { critical: 0, caution: 0, tip: 0 };
+      CARDS.forEach(function (c) { if (c.topic === t.n) bySev[c.m.sv]++; });
+      return '<details class="topic"><summary>' +
+        '<span class="dotc" style="background:' + esc(t.c) + '"></span>' +
+        '<span>' + esc(t.n) + '</span>' +
+        '<span class="tn">카드 ' + n + ' · 🔴' + bySev.critical + ' 🟡' + bySev.caution + ' 🟢' + bySev.tip + '</span>' +
+        '</summary><div class="topicbody">' +
+        '<p class="lead">' + esc(t.lead || '') + '</p>' +
+        (t.points && t.points.length ? '<ul>' + t.points.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' : '') +
+        (t.warn ? '<div class="warn2"><b>⚠️ 의견 갈림</b> — ' + esc(t.warn) + '</div>' : '') +
+        '<div><button class="btn small" type="button" data-topic="' + esc(t.n) + '">이 주제 카드 ' + n + '장만 보기</button></div>' +
+        '</div></details>';
+    }).join('');
+    box.innerHTML = '<details class="fold"><summary><h2>주제별 정리</h2>' +
+      '<span class="n">' + (DATA.topics || []).length + '개 주제 · 주제를 고르면 카드가 그 주제만 남습니다</span></summary>' +
+      '<div class="foldbody" style="padding-top:10px">' + items + '</div></details>';
   }
 
   /* ── 상태 표시 ───────────────────────────────────────── */
   function setState(text, kind) {
     var el = $('#stateTxt');
+    if (!el) return;
     el.textContent = text;
     el.className = 'state' + (kind ? ' ' + kind : '');
     el.title = text;
   }
 
+  /* ── 전체 렌더 ────────────────────────────────────────── */
+  function renderAll() {
+    renderMonths();
+    renderPlaybook();
+    renderRows();
+    renderDeck();
+    var m = $$('#mstrip .mbtn').filter(function (b) { return b.dataset.m === S.month; })[0];
+    if (m && m.scrollIntoView && m.parentNode && m.parentNode.scrollWidth > m.parentNode.clientWidth) {
+      m.scrollIntoView({ block: 'nearest', inline: 'center' });
+    }
+  }
+
+  function setMonth(m, scroll) {
+    S.month = m;
+    S.topic = '';
+    renderAll();
+    if (scroll) {
+      var top = $('#playbook').getBoundingClientRect().top + window.pageYOffset - 108;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }
+  }
+
+  function jumpToCard(id) {
+    var a = BYID[id]; if (!a) return;
+    S.month = a.m; S.sev = 'all'; S.role = 'all'; S.ms = false; S.topic = ''; S.q = '';
+    var qi = $('#q'); if (qi) qi.value = '';
+    renderAll();
+    var el = $('#cards .card[data-id="' + id + '"]');
+    if (!el) { toast('이 카드를 찾지 못했습니다', true); return; }
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+    var top = el.getBoundingClientRect().top + window.pageYOffset - 96;
+    window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }
+
   /* ── 동기화 ──────────────────────────────────────────── */
-  var syncing = false;
   function sync(opts) {
     opts = opts || {};
     if (!DATA) setState('데이터 없음');
@@ -499,25 +603,21 @@
     else if (d) d.removeAttribute('open');
   }
   function refreshDlgInfo() {
-    var lines = [];
-    if (DATA) {
-      lines.push('지금 담긴 데이터 · ' + (DATA.title || '') + ' / 글 ' + num(DATA.source.articles) + '건 · 댓글 ' + num(DATA.source.comments) + '건');
-      lines.push('받은 시각 · ' + (DATA.built_at || '-') + (lastMeta && lastMeta.source === 'file' ? ' (내 JSON 파일)' : ' (드라이브)'));
-    } else {
-      lines.push('아직 담긴 데이터가 없습니다.');
-    }
-    var last = +(lsGet(LS_SYNC) || 0);
-    lines.push('마지막 동기화 · ' + (last ? nowText(last) : '없음'));
-    lines.push('연결 주소 · ' + (bridgeUrl() ? '설정됨' : '없음'));
-    if (typeof navigator !== 'undefined' && 'storage' in navigator && navigator.storage && navigator.storage.estimate) {
-      navigator.storage.estimate().then(function (e) {
-        var kb = Math.round((e.usage || 0) / 1024);
-        var el = $('#dlgWhere');
-        if (el) el.textContent = '저장 위치 이 기기 · ' + kb.toLocaleString('ko-KR') + 'KB 사용';
-      }).catch(function () {});
-    }
-    $('#dlgInfo').textContent = lines.join('\n');
-    $('#dlgWhere').textContent = '저장 위치 · 이 브라우저(IndexedDB)';
+    try {
+      var lines = [];
+      if (DATA) {
+        lines.push('지금 담긴 데이터 · ' + (DATA.title || '') + ' / 글 ' + num(DATA.source.articles) + '건 · 댓글 ' + num(DATA.source.comments) + '건');
+        lines.push('양식 · schema ' + (DATA.schema || 1) + ' · 카드 ' + num(CARDS.length) + '장 · 월별 플레이북 ' + Object.keys(DATA.monthlyPlaybooks || {}).length + '개');
+        lines.push('데이터 기준 · ' + (DATA.built_at || '-') + (lastMeta && lastMeta.source === 'file' ? ' (내 JSON 파일)' : ' (드라이브)'));
+      } else {
+        lines.push('아직 담긴 데이터가 없습니다.');
+      }
+      var last = +(lsGet(LS_SYNC) || 0);
+      lines.push('마지막 동기화 · ' + (last ? nowText(last) : '없음'));
+      lines.push('연결 주소 · ' + (bridgeUrl() ? '설정됨' : '없음'));
+      $('#dlgInfo').textContent = lines.join('\n');
+      $('#dlgWhere').textContent = '저장 위치 · 이 브라우저(IndexedDB)';
+    } catch (e) { /* noop */ }
   }
 
   /* ── 로컬 파일 ───────────────────────────────────────── */
@@ -551,6 +651,10 @@
       e.target.value = '';
       loadFile(f);
     });
+    $('#brandLink').addEventListener('click', function (e) {
+      e.preventDefault();
+      setMonth('all', true);
+    });
 
     $('#dlgClose').addEventListener('click', closeDlg);
     $('#dlgSave').addEventListener('click', function () {
@@ -578,169 +682,79 @@
       if (!window.confirm('이 기기에 담긴 데이터를 지울까요? (드라이브 원본은 그대로)')) return;
       memRec = null;
       (idbBroken ? Promise.resolve() : idbDel(REC).catch(function () { })).then(function () {
-        DATA = null; BYID = Object.create(null); HAY = new Map();
+        DATA = null; BYID = Object.create(null); HAY = new Map(); CARDS = [];
         $('#content').hidden = true;
         $('#setupPanel').hidden = false;
-        $('#chips').hidden = true;
-        $('#topics').innerHTML = '';
+        $('#mstrip').innerHTML = '';
         setState('데이터 없음');
         refreshDlgInfo();
         toast('이 기기의 데이터를 지웠습니다');
       });
     });
 
-    // 월 탭
-    $('#mtabs').addEventListener('click', function (e) {
-      var b = e.target.closest('.mtab'); if (!b) return;
-      var i = MONTHS.indexOf(b.dataset.m) + 1;
-      if (S.from === i && S.to === i) setRange(1, MONTHS.length);
-      else setRange(i, i);
+    // 월 선택 (스트립 · 연간 카드 · 월별 글 칩)
+    document.addEventListener('click', function (e) {
+      var mb = e.target.closest('[data-m]');
+      if (mb && !e.target.closest('.row')) { setMonth(mb.dataset.m, true); return; }
+      var jp = e.target.closest('[data-jump]');
+      if (jp) { jumpToCard(+jp.dataset.jump); return; }
+      var ch = e.target.closest('#chips .chip');
+      if (ch) {
+        if (ch.dataset.sev) S.sev = ch.dataset.sev;
+        if (ch.dataset.role) S.role = S.role === ch.dataset.role ? 'all' : ch.dataset.role;
+        if (ch.dataset.ms) S.ms = !S.ms;
+        if (ch.dataset.topicclear) S.topic = '';
+        renderDeck();
+        return;
+      }
+      var tb = e.target.closest('[data-topic]');
+      if (tb) {
+        S.topic = tb.dataset.topic; S.month = 'all';
+        renderAll();
+        var top = $('#deckbar').getBoundingClientRect().top + window.pageYOffset - 104;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+        return;
+      }
+      if (e.target.closest('#btnMoreHit')) {
+        searchLimit += 40; renderSearch(S.q.trim().toLowerCase());
+      }
     });
-    $('#presets').addEventListener('click', function (e) {
-      var p = e.target.closest('.pill'); if (!p) return;
-      var r = p.dataset.preset.split('-').map(Number);
-      setRange(r[0], r[1]);
-    });
-    $('#mFrom').addEventListener('change', function () { setRange(+this.value, S.to); });
-    $('#mTo').addEventListener('change', function () { setRange(S.from, +this.value); });
 
     // 검색
     var qt = null;
     $('#q').addEventListener('input', function () {
       var v = this.value;
       clearTimeout(qt);
-      qt = setTimeout(function () { S.q = v; applyFilter(); }, 170);
+      qt = setTimeout(function () { S.q = v; searchLimit = 40; renderDeck(); }, 170);
     });
-    $('#msOnly').addEventListener('click', function () {
-      S.ms = !S.ms; this.classList.toggle('on', S.ms); applyFilter();
+    $('#btnClearQ').addEventListener('click', function () {
+      S.q = ''; $('#q').value = ''; renderDeck(); $('#q').focus();
     });
-    $('#btnClear').addEventListener('click', function () {
-      S.q = ''; S.ms = false; $('#q').value = ''; $('#msOnly').classList.remove('on');
-      setRange(1, MONTHS.length); toast('조건을 초기화했습니다');
-    });
-    $('#btnTop10').addEventListener('click', function () { setRange(1, MONTHS.length, { scrollTop: true }); });
+    $('#sortSel').addEventListener('change', function () { S.sort = this.value; renderDeck(); });
+    $('#btnTop').addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
 
-    // 요약 접기
-    $('#btnSumFold').addEventListener('click', function () {
-      var s = $('#summary');
-      s.classList.toggle('folded');
-      this.textContent = s.classList.contains('folded') ? '요약 펼치기' : '요약 접기';
-    });
-    $('#btnHL').addEventListener('click', function () {
-      var l = $('#hlist');
-      l.classList.toggle('hide');
-      this.textContent = l.classList.contains('hide') ? '펼치기' : '접기';
-    });
-    $('#btnAllClose').addEventListener('click', function () { setAllTopics(false); });
-    $('#btnAllOpen').addEventListener('click', function () { setAllTopics(true); });
-
-    // 주제 접기
-    $('#topics').addEventListener('click', function (e) {
-      var head = e.target.closest('.thead');
-      if (head) {
-        var sec = head.closest('.topic');
-        var body = $('.tbody', sec);
-        var hide = !body.classList.contains('hide');
-        body.classList.toggle('hide', hide);
-        head.setAttribute('aria-expanded', hide ? 'false' : 'true');
-        var tg = $('.toggle', head);
-        if (tg) tg.textContent = hide ? '펼치기' : '접기';
-        return;
-      }
-      var nm = e.target.closest('.nm[data-topic]');
-      if (nm) {
-        var sec2 = $$('#topics .topic').filter(function (s) { return s.dataset.topic === nm.dataset.topic; })[0];
-        if (sec2) {
-          $('.tbody', sec2).classList.remove('hide');
-          sec2.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }
-    });
-    $('#topics').addEventListener('keydown', function (e) {
-      var head = e.target.closest && e.target.closest('.thead');
-      if (head && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); head.click(); }
-    });
-
-    // 정렬
-    $('#topics').addEventListener('change', function (e) {
-      var sel = e.target.closest('.sortsel'); if (!sel) return;
-      var sec = sel.closest('.topic');
-      var box = $('[data-role=rows]', sec);
-      var rows = $$('.row', box);
-      var mode = sel.value;
-      rows.sort(function (a, b) {
-        if (mode === 'new') return a.dataset.d < b.dataset.d ? 1 : a.dataset.d > b.dataset.d ? -1 : 0;
-        if (mode === 'like') return (+b.dataset.like) - (+a.dataset.like) || (+b.dataset.cmt) - (+a.dataset.cmt);
-        return (+b.dataset.cmt) - (+a.dataset.cmt);
-      });
-      rows.forEach(function (r) { box.appendChild(r); });
-    });
-
-    // 상세 펼칠 때 내용 채우기
-    $('#topics').addEventListener('toggle', function (e) {
+    // 원문 글 펼칠 때 내용 채우기
+    document.addEventListener('toggle', function (e) {
       var d = e.target;
-      if (!d.classList || !d.classList.contains('row')) return;
-      if (d.open && !d.dataset.loaded) {
-        var a = BYID[+d.dataset.id];
-        if (a) { d.insertAdjacentHTML('beforeend', detailHtml(a)); d.dataset.loaded = '1'; }
+      if (!d.classList) return;
+      if (d.classList.contains('row')) {
+        if (d.open && !d.dataset.loaded) {
+          var a = BYID[+d.dataset.id];
+          if (a) { d.insertAdjacentHTML('beforeend', detailHtml(a)); d.dataset.loaded = '1'; }
+        }
+      } else if (d.classList.contains('src')) {
+        if (d.open && !d.dataset.loaded) {
+          var card = d.closest('.card');
+          var ac = card ? BYID[+card.dataset.id] : null;
+          if (ac) { d.insertAdjacentHTML('beforeend', cardSrcHtml(ac)); d.dataset.loaded = '1'; }
+        }
       }
     }, true);
 
-    // 하이라이트 → 그 글 펼치기
-    $('#hlist').addEventListener('click', function (e) {
-      var a = e.target.closest('[data-open]'); if (!a) return;
-      e.preventDefault();
-      openArticle(+a.dataset.open);
-    });
-
-    // 월별 막대 → 그 달
-    $('#mbars').addEventListener('click', function (e) {
-      var d = e.target.closest('[data-m]'); if (!d) return;
-      var i = MONTHS.indexOf(d.dataset.m) + 1;
-      setRange(i, i);
-      $('#toolbar').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-
-    // 주제 순위(요약) → 그 주제로
-    $('#rank').addEventListener('click', function (e) {
-      var nm = e.target.closest('.nm[data-topic]'); if (!nm) return;
-      var sec = $$('#topics .topic').filter(function (s) { return s.dataset.topic === nm.dataset.topic; })[0];
-      if (sec) {
-        $('.tbody', sec).classList.remove('hide');
-        sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    });
-
-    $('#btnTop').addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
-
-    // 돌아오면 조용히 새로 받기
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible') autoSync();
     });
     window.addEventListener('online', function () { autoSync(); });
-  }
-
-  function setAllTopics(open) {
-    $$('#topics .topic').forEach(function (sec) {
-      $('.tbody', sec).classList.toggle('hide', !open);
-      var head = $('.thead', sec);
-      if (head) head.setAttribute('aria-expanded', open ? 'true' : 'false');
-      var tg = $('.toggle', head);
-      if (tg) tg.textContent = open ? '접기' : '펼치기';
-    });
-  }
-
-  function openArticle(id) {
-    if (S.ms || S.q) { S.ms = false; S.q = ''; $('#q').value = ''; $('#msOnly').classList.remove('on'); }
-    if (!inRange(BYID[id])) setRange(monthIdx(BYID[id].m), monthIdx(BYID[id].m));
-    applyFilter();
-    var row = $$('.row').filter(function (r) { return +r.dataset.id === id; })[0];
-    if (!row) { toast('이 글은 담긴 데이터에 없습니다', true); return; }
-    var sec = row.closest('.topic');
-    $('.tbody', sec).classList.remove('hide');
-    row.open = true;
-    if (!row.dataset.loaded) { row.insertAdjacentHTML('beforeend', detailHtml(BYID[id])); row.dataset.loaded = '1'; }
-    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   /* ── 시작 ────────────────────────────────────────────── */
@@ -752,7 +766,7 @@
       });
     }
     var cached = memRec;
-    var p = idbBroken ? Promise.resolve(null) : idbGet(REC).catch(function (e) { idbBroken = true; return null; });
+    var p = idbBroken ? Promise.resolve(null) : idbGet(REC).catch(function () { idbBroken = true; return null; });
     Promise.resolve(p).then(function (rec) {
       rec = rec || cached;
       if (rec && rec.json) {
@@ -764,10 +778,9 @@
         setState(bridgeUrl() ? '연결됨 · 아직 받은 데이터 없음' : '데이터 없음');
       }
       autoSync();
-      refreshDlgInfoSafe();
+      refreshDlgInfo();
     });
   }
-  function refreshDlgInfoSafe() { try { refreshDlgInfo(); } catch (e) { } }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
