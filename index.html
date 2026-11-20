@@ -139,5 +139,20 @@
 </dialog>
 
 <script src="app.js"></script>
+<script>
+/* 새 껍데기를 받는 중(옛 app.js가 돌고 있는 짧은 순간)이면 안내만 띄운다. 데이터와는 무관. */
+setTimeout(function () {
+  if (window.__naVersion) return;
+  var d = document.createElement('div');
+  d.setAttribute('style', 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99;background:#131820;color:#fff;padding:12px 14px;border-radius:12px;font:14px/1.5 -apple-system,"Apple SD Gothic Neo",sans-serif;box-shadow:0 12px 30px -12px rgba(0,0,0,.5)');
+  d.innerHTML = '앱 파일을 새로 받는 중입니다. <b>새로고침</b>을 한 번 눌러 주세요.';
+  var b = document.createElement('button');
+  b.textContent = '새로고침';
+  b.setAttribute('style', 'margin-left:10px;background:#fff;color:#131820;border:0;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer');
+  b.onclick = function () { location.reload(); };
+  d.appendChild(b);
+  document.body.appendChild(d);
+}, 2000);
+</script>
 </body>
 </html>
