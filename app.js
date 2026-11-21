@@ -566,9 +566,8 @@
   /* ── 검색 결과 ─────────────────────────────────────────── */
   var searchLimit = 40, searchHits = [];
   function renderSearch(q) {
+    /* 검색은 달·연도와 상관없이 두 해 전체에서 찾는다(카드 먼저). 결과에 연도 배지가 붙는다. */
     searchHits = DATA.articles.filter(function (a) {
-      if (S.month !== 'all' && monOf(a) !== S.month) return false;
-      if (S.year !== 'all' && yrOf(a) !== String(S.year)) return false;
       return hay(a).indexOf(q) >= 0;
     }).sort(function (x, y) {
       var cx = CMETA[x.i] ? 2 : 0, cy = CMETA[y.i] ? 2 : 0;
@@ -576,8 +575,7 @@
     });
     var show = searchHits.slice(0, searchLimit);
     var h = ['<div class="shead"><h2>“' + esc(S.q.trim()) + '” 검색 결과</h2>' +
-      '<span class="n">' + num(searchHits.length) + '건 · ' + (S.month === 'all' ? '두 해 전체' : esc(mLabel(S.month))) +
-      (S.year === 'all' ? '' : ' · ' + S.year + '년') + ' · 카드 먼저, 댓글 많은 순</span></div>'];
+      '<span class="n">' + num(searchHits.length) + '건 · 2025+2026 전체 · 카드 먼저, 댓글 많은 순</span></div>'];
     if (!searchHits.length) {
       h.push('<div class="empty">찾는 내용이 없습니다. 짧은 낱말로 다시 검색해 보세요 (예: 반변경, 생기부, 권한).</div>');
     } else {
