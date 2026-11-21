@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Y공작소 아카이브 · 2026 나이스 플레이북</title>
+<title>Y공작소 아카이브 · 2025+2026 나이스 플레이북</title>
 <meta name="theme-color" content="#ffffff">
-<meta name="description" content="2026년 1~10월 Y공작소 본문·댓글을 교사 실무 플레이북으로 정리했습니다. 데이터는 내 비공개 구글 드라이브에서만 불러옵니다.">
+<meta name="description" content="2025년 1~12월과 2026년 1~10월 Y공작소 본문·댓글을 달마다 2025/2026으로 나눠 보는 교사 실무 플레이북입니다. 데이터는 내 비공개 구글 드라이브에서만 불러옵니다.">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="styles.css?v=8">
+<link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
 
@@ -17,7 +17,7 @@
   <div class="tb-in">
     <a class="brand" href="#" id="brandLink">
       <span class="logo" aria-hidden="true">Y</span>
-      <span class="bt"><b>Y공작소 아카이브</b><em id="brandSub">2026 1~10월</em></span>
+      <span class="bt"><b>Y공작소 아카이브</b><em id="brandSub">2025 1~12월 · 2026 1~10월</em></span>
     </a>
     <div class="tb-right">
       <span class="state" id="stateTxt">데이터 없음</span>
@@ -45,7 +45,7 @@
     </div>
     <div class="way">
       <div class="wayhead"><span class="num">2</span><h3>내려받은 JSON 파일 열기</h3><span class="bdg">보조</span></div>
-      <p>휴대폰이나 PC에 <code>neis-y2026-archive.json</code>이 있으면 골라서 열 수 있습니다. 불러온 뒤에도 이 기기 저장소에 담기므로 인터넷 없이 열립니다.</p>
+      <p>휴대폰이나 PC에 <code>neis-y2025-2026-archive.json</code>이 있으면 골라서 열 수 있습니다. 불러온 뒤에도 이 기기 저장소에 담기므로 인터넷 없이 열립니다.</p>
       <div class="waybtns"><button class="btn" type="button" id="btnSetupFile">JSON 파일 선택</button></div>
     </div>
     <p class="mini">연결 주소·데이터는 이 브라우저에만 저장되고 GitHub에는 올라가지 않습니다. 연결 주소를 아는 사람은 데이터를 볼 수 있으니 공유하지 마세요.</p>
@@ -55,6 +55,7 @@
 
     <!-- 검색 · 필터 (월 스트립 바로 아래 고정) -->
     <section class="deckbar" id="deckbar">
+      <div class="yrseg" id="yrseg" role="tablist" aria-label="연도 선택"></div>
       <div class="barrow">
         <div class="searchrow">
           <span class="sic" aria-hidden="true">⌕</span>
@@ -146,7 +147,7 @@
   </form>
 </dialog>
 
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 <script>
 /* 새 껍데기를 받는 중(옛 app.js가 돌고 있는 짧은 순간)이면 안내만 띄운다. 데이터와는 무관. */
 setTimeout(function () {

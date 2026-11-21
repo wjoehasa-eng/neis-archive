@@ -1,28 +1,32 @@
-/* Y공작소 아카이브 · 2026 나이스 플레이북 (껍데기 PWA)
+/* Y공작소 아카이브 · 2025+2026 나이스 플레이북 (껍데기 PWA)
  * ────────────────────────────────────────────────────────────
  * 이 파일에는 게시글·댓글 등 실제 데이터가 한 줄도 없다.
  * 데이터는 ① 내 비공개 구글 드라이브(Apps Script 연결 주소) 또는
  *            ② 사용자가 고른 로컬 JSON 파일로만 들어오고,
  *            IndexedDB(이 기기)에만 담긴다.
+ *
+ * v9: 한 달 안에서 [종합(25+26) | 2026년 | 2025년] 을 전환해 본다.
+ *     카드·플레이북에 연도 배지를 붙여 출처 연도를 구분한다.
  */
 (function () {
   'use strict';
 
-  var LS_URL = 'na.bridge', LS_KEY = 'na.key', LS_SYNC = 'na.lastSyncMeta', LS_PBFOLD = 'na.pbFold';
+  var LS_URL = 'na.bridge', LS_KEY = 'na.key', LS_SYNC = 'na.lastSyncMeta', LS_PBFOLD = 'na.pbFold',
+      LS_YEAR = 'na.year';
   var DB_NAME = 'neis-archive', STORE = 'kv', REC = 'archive';
   var AUTO_MS = 30 * 60 * 1000;           // 30분 지나면 조용히 새로 받기
   var MAX_KB = 60 * 1024;                 // 받는 파일 상한(60MB)
 
-  var DATA = null, MONTHS = [], BYID = Object.create(null), HAY = new Map();
+  var DATA = null, MONTHS = [], YEARS = [], MS = {}, BYID = Object.create(null), HAY = new Map();
   var CMETA = Object.create(null), CARDS = [], TOPICMETA = Object.create(null);
   var SEVR = { critical: 3, caution: 2, tip: 1 };
   var SEVLBL = { critical: '🔴 사고주의', caution: '🟡 예외주의', tip: '🟢 단순팁' };
   var ROLLBL = { homeroom: '담임', admin: '부장·관리자', all: '공통' };
-  var S = { month: 'all', sev: 'all', role: 'all', ms: false, topic: '', q: '', sort: 'sev' };
+  var S = { month: 'all', year: 'all', sev: 'all', role: 'all', ms: false, topic: '', q: '', sort: 'sev' };
   var lastMeta = null, syncing = false;
 
   window.__naErrors = [];
-  window.__naVersion = '2026-11-20.8';
+  window.__naVersion = '2026-11-21.9';
   window.addEventListener('error', function (e) { window.__naErrors.push(String((e && e.message) || e)); });
   window.addEventListener('unhandledrejection', function (e) {
     var r = e && e.reason; window.__naErrors.push('promise: ' + String((r && r.message) || r));
@@ -46,7 +50,13 @@
     s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
     return s.length > n ? s.slice(0, n).replace(/[ ,·]$/, '') + '…' : s;
   }
-  function mLabel(m) { return m && m.length >= 7 ? (+m.slice(5)) + '월' : ''; }
+  function mLabel(m) { return m ? (+m) + '월' : ''; }                       // m = '01'
+  function monOf(a) { return String(a.m || '').slice(5); }                  // 기사 → '01'
+  function yrOf(a) { return String(a.m || '').slice(0, 4); }                // 기사 → '2025'
+  function dLabel(a) {                                                      // '25.03.15'
+    var m = String(a.m || '');
+    return m.slice(2, 4) + '.' + m.slice(5) + '.' + String(a.d || '').slice(8, 10);
+  }
   function pathText(mp) {
     var segs = String(mp || '').match(/\[([^\]]+)\]/g) || [];
     segs = segs.map(function (s) { return s.slice(1, -1).replace(/\s+/g, ' ').trim(); });
@@ -61,6 +71,13 @@
     t.className = 'toast' + (isErr ? ' err' : '');
     clearTimeout(toast._t);
     toast._t = setTimeout(function () { t.hidden = true; }, isErr ? 5200 : 3000);
+  }
+  function yrBadge(y) {
+    return '<span class="tg yr' + (String(y) === '2025' ? ' y25' : '') + '">' + esc(y) + '</span>';
+  }
+  function statOf(key) {
+    var s = MS[key];
+    return s ? { a: s.a || 0, c: s.c || 0, k: s.k || 0 } : { a: 0, c: 0, k: 0 };
   }
 
   /* ── IndexedDB (이 기기 캐시) ──────────────────────────── */
@@ -99,7 +116,7 @@
     var url = bridgeUrl();
     if (!url) return Promise.reject(new Error('연결 주소가 없습니다'));
     var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, timeoutMs || 60000);
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, timeoutMs || 90000);
     var payload = { action: body.action || 'get', key: bridgeKey(), app: 'neis-y-archive' };
     return fetch(url, {
       method: 'POST',
@@ -125,7 +142,7 @@
   }
   function bridgeInfo() { return callBridge({ action: 'info' }, 30000); }
   function bridgeGet() {
-    return callBridge({ action: 'get' }, 120000).then(function (body) {
+    return callBridge({ action: 'get' }, 180000).then(function (body) {
       var payload = body;
       if (body && typeof body.text === 'string') {
         try { payload = JSON.parse(body.text); } catch (e) { throw new Error('아카이브 형식이 아닙니다'); }
@@ -138,8 +155,9 @@
   }
 
   function saveArchive(payload, source, extra) {
-    var json = JSON.stringify(payload);
-    var rec = { json: json, savedAt: Date.now(), source: source, built: payload.built_at || '', bytes: json.length };
+    var s;
+    try { s = JSON.stringify(payload); } catch (e) { s = ''; }
+    var rec = { json: s, savedAt: Date.now(), source: source, built: payload.built_at || '', bytes: s.length };
     if (extra) { rec.driveUpdated = extra.driveUpdated || ''; rec.driveSize = String(extra.driveSize || ''); }
     memRec = rec;
     if (!idbBroken) return idbSet(REC, rec).catch(function () { idbBroken = true; });
@@ -151,7 +169,22 @@
     if (!payload || !payload.articles) return;
     var first = !DATA;
     DATA = payload;
-    MONTHS = payload.months && payload.months.length ? payload.months : ['2026-01'];
+
+    MONTHS = (payload.months && payload.months.length) ? payload.months.slice() : ['01'];
+    if (String(MONTHS[0]).length > 2) MONTHS = MONTHS.map(function (m) { return m.slice(5); });
+    YEARS = (payload.years && payload.years.length) ? payload.years.slice()
+      : (function () { var ys = {}; payload.articles.forEach(function (a) { ys[yrOf(a)] = 1; });
+          return Object.keys(ys).sort().reverse(); })();
+    YEARS = YEARS.map(function (y) { return String(y).slice(0, 4); });
+
+    MS = payload.monthStat || (function () {          // schema 2 호환
+      var o = {};
+      Object.keys(payload.month_counts || {}).forEach(function (k) {
+        o[k] = { a: payload.month_counts[k] || 0 }; o[k].c = (payload.month_comments || {})[k] || 0;
+      });
+      return o;
+    })();
+
     BYID = Object.create(null); HAY = new Map(); CMETA = Object.create(null);
     TOPICMETA = Object.create(null); CARDS = [];
     payload.articles.forEach(function (a) { BYID[a.i] = a; });
@@ -160,13 +193,18 @@
     Object.keys(CMETA).forEach(function (k) {
       var a = BYID[+k]; if (!a) return;
       var m = CMETA[k];
-      CARDS.push({ id: +k, a: a, m: m, topic: a.p || '' });
+      CARDS.push({ id: +k, a: a, m: m, topic: a.p || '', y: m.y || yrOf(a) });
     });
     CARDS.sort(cardOrder);
     lastMeta = meta || null;
 
-    if (first) { S.month = 'all'; }
+    if (first) {
+      S.month = 'all';
+      var ly = lsGet(LS_YEAR);
+      S.year = ly && (ly === 'all' || YEARS.indexOf(ly) >= 0) ? ly : 'all';
+    }
     if (S.month !== 'all' && MONTHS.indexOf(S.month) < 0) S.month = 'all';
+    if (S.year !== 'all' && YEARS.indexOf(S.year) < 0) S.year = 'all';
     S.q = ''; var qi = $('#q'); if (qi) qi.value = '';
 
     renderShell();
@@ -199,6 +237,7 @@
 
   function renderShell() {
     syncTopbarHeight();
+    renderYears();
     renderMonths();
     renderPlaybook();
     renderRows();
@@ -206,20 +245,54 @@
     renderFooter();
   }
 
-  /* 월 스트립 숫자는 ‘대표 카드 수’로 통일(원문 글 수는 월 헤더 부제목과 툴팁에만). */
+  /* ── 연도 전환 탭 ─────────────────────────────────────── */
+  function cardCountMonthYear(m, y) {
+    var any = (y == null || y === 'all');
+    return CARDS.filter(function (c) {
+      return (m === 'all' || monOf(c.a) === m) && (any || String(c.y) === String(y));
+    }).length;
+  }
+  function yearAvail(y) {
+    if (S.month === 'all') {
+      return CARDS.some(function (c) { return String(c.y) === String(y); });
+    }
+    return statOf(y + '-' + S.month).a > 0 || cardCountMonthYear(S.month, y) > 0;
+  }
+  function renderYears() {
+    var box = $('#yrseg');
+    if (!box) return;
+    if (S.year !== 'all' && !yearAvail(S.year)) S.year = 'all';
+    var h = [];
+    h.push('<button class="yrbtn' + (S.year === 'all' ? ' on' : '') + '" type="button" role="tab" data-y="all" aria-selected="' +
+      (S.year === 'all') + '">종합(25+26)<span class="n">' +
+      (S.month === 'all' ? CARDS.length : cardCountMonthYear(S.month)) + '</span></button>');
+    YEARS.forEach(function (y) {
+      var n = S.month === 'all' ? cardCountMonthYear('all', y) : cardCountMonthYear(S.month, y);
+      var off = !yearAvail(y);
+      h.push('<button class="yrbtn' + (S.year === String(y) ? ' on' : '') + '" type="button" role="tab" data-y="' + y + '"' +
+        ' aria-selected="' + (S.year === String(y)) + '"' + (off ? ' disabled' : '') +
+        ' title="' + y + '년 카드 ' + n + '장' + (off ? ' · 이 달 자료 없음' : '') + '">' +
+        y + '년<span class="n">' + n + '</span></button>');
+    });
+    box.innerHTML = h.join('');
+  }
+
+  /* 월 스트립 숫자는 ‘대표 카드 수’(연도 필터 반영). 원문 글 수는 툴팁에. */
   function renderMonths() {
-    var counts = Object.create(null);
-    CARDS.forEach(function (c) { counts[c.a.m] = (counts[c.a.m] || 0) + 1; });
-    var arts = DATA.month_counts || {};
-    var cmts = DATA.month_comments || {};
     var html = ['<div class="mstrip-in">'];
+    var allCnt = S.year === 'all' ? CARDS.length : cardCountMonthYear('all', S.year);
     html.push('<button class="mbtn all' + (S.month === 'all' ? ' on' : '') + '" type="button" data-m="all"' +
-      ' title="전체 카드 ' + CARDS.length + '장 · 원문 ' + num(DATA.articles.length) + '건">' +
-      '<b>전체</b><span>' + CARDS.length + '</span></button>');
+      ' title="전체 카드 ' + allCnt + '장 · 원문 ' + num(DATA.articles.length) + '건">' +
+      '<b>전체</b><span>' + allCnt + '</span></button>');
     MONTHS.forEach(function (m) {
-      html.push('<button class="mbtn' + (S.month === m ? ' on' : '') + '" type="button" data-m="' + m + '"' +
-        ' title="' + m.slice(5) + '월 · 카드 ' + (counts[m] || 0) + '장 / 원문 글 ' + num(arts[m] || 0) + '건 · 댓글 ' + num(cmts[m] || 0) + '개">' +
-        '<b>' + (+m.slice(5)) + '월</b><span>' + num(counts[m] || 0) + '</span></button>');
+      var n = S.year === 'all' ? cardCountMonthYear(m) : cardCountMonthYear(m, S.year);
+      var tip = (+m) + '월';
+      YEARS.forEach(function (y) {
+        var st = statOf(y + '-' + m);
+        if (st.a) tip += ' · ' + y + ' 글 ' + num(st.a) + '건/댓글 ' + num(st.c) + '개/카드 ' + cardCountMonthYear(m, y) + '장';
+      });
+      html.push('<button class="mbtn' + (S.month === m ? ' on' : '') + '" type="button" data-m="' + m + '" title="' + tip + '">' +
+        '<b>' + (+m) + '월</b><span>' + num(n) + '</span></button>');
     });
     html.push('</div>');
     $('#mstrip').innerHTML = html.join('');
@@ -235,17 +308,18 @@
     return m.ch || m.t || a.t;
   }
 
-  function renderPlaybook() {
-    var box = $('#playbook');
-    var folded = pbFolded();
-    box.classList.toggle('folded', folded);
-    if (S.month === 'all') { box.innerHTML = yearHtml(folded); return; }
-    var pb = (DATA.monthlyPlaybooks || {})[S.month];
-    if (!pb) {
-      box.innerHTML = '<div class="pb-head"><div class="pb-kick">' + esc(mLabel(S.month)) + ' 업무 흐름</div>' +
-        '<h1>이 달의 플레이북이 아직 없습니다</h1><p class="pb-sum">데이터 양식이 예전 것입니다 — 위의 <b>동기화</b>를 눌러 새 플레이북 데이터를 받아 주세요.</p></div>';
-      return;
-    }
+  function playbooksOf(m) {
+    var out = [];
+    var yl = S.year === 'all' ? YEARS : [S.year];
+    yl.forEach(function (y) {
+      var pb = (DATA.monthlyPlaybooks || {})[y + '-' + m];
+      if (pb) out.push({ y: String(y), pb: pb });
+    });
+    return out;
+  }
+
+  function pbSection(o, idx, folded) {
+    var pb = o.pb, y = o.y;
     var steps = pb.steps.map(function (s, i) {
       var chips = (s[2] || []).map(function (id) {
         var a = BYID[id]; if (!a) return '';
@@ -261,62 +335,103 @@
       return '<li><div><b>' + esc(p[0]) + '</b><span>' + esc(p[1]) + '</span></div>' +
         (a ? '<button class="mini-chip" type="button" data-jump="' + id + '" title="' + esc((CMETA[id] || {}).t || a.t) + '">' + esc(chipLabel(id, a)) + '</button>' : '<span></span>') + '</li>';
     }).join('');
-    var arts = (DATA.month_counts || {})[S.month] || 0;
-    var cmts = (DATA.month_comments || {})[S.month] || 0;
-    var cards = CARDS.filter(function (c) { return c.a.m === S.month; }).length;
-    box.innerHTML =
+    var st = statOf(y + '-' + (S.month === 'all' ? '01' : S.month));
+    var arts = S.month === 'all' ? 0 : st.a;
+    var cmts = S.month === 'all' ? 0 : st.c;
+    var cards = cardCountMonthYear(S.month === 'all' ? 'all' : S.month, y);
+    return '<div class="pb-sec">' +
+      (idx ? '<div class="pb-yhead"><b>' + y + '년</b><span class="yline"></span><em>' + esc(pb.label) + '</em></div>' : '') +
       '<div class="pb-head">' +
-      '<div class="pb-top"><div class="pb-kick">' + esc(mLabel(S.month)) + ' 업무 흐름 · 2026</div>' + foldBtn(folded) + '</div>' +
-      '<h1><small>' + esc(mLabel(S.month)) + '에 할 일</small>' + esc(pb.label) + '</h1>' +
+      '<div class="pb-top"><div class="pb-kick">' + esc(mLabel(S.month)) + ' 업무 흐름 · ' + y + '</div>' +
+      (idx === 0 ? foldBtn(folded) : '') + '</div>' +
+      '<h1><small>' + esc(mLabel(S.month)) + '에 할 일 · ' + y + '년</small>' + esc(pb.label) + '</h1>' +
       '<p class="pb-sum">' + esc(pb.summary) + '</p>' +
-      '<p class="pb-sub">원문 글 ' + num(arts) + '건 · 댓글 ' + num(cmts) + '개에서 뽑은 대표 카드 ' + num(cards) + '장</p></div>' +
+      (S.month !== 'all'
+        ? '<p class="pb-sub">' + y + '년 ' + esc(mLabel(S.month)) + ' 원문 글 ' + num(arts) + '건 · 댓글 ' + num(cmts) + '개에서 뽑은 대표 카드 ' + num(cards) + '장</p>'
+        : '<p class="pb-sub">' + y + '년 카드 ' + num(cards) + '장</p>') +
+      '</div>' +
       '<ol class="flow">' + steps + '</ol>' +
       '<div class="mines" id="mines"><div class="mines-h"><span class="mines-ic">⚠️</span><div>' +
       '<b>이달의 지뢰 ' + pb.pitfalls.length + '</b><em>여기서 미끄러지면 복구가 어렵거나 일이 두 배가 됩니다</em></div></div>' +
-      '<ul>' + mines + '</ul></div>';
+      '<ul>' + mines + '</ul></div></div>';
+  }
+
+  function renderPlaybook() {
+    var box = $('#playbook');
+    var folded = pbFolded();
+    box.classList.toggle('folded', folded);
+    if (S.month === 'all') { box.innerHTML = yearHtml(folded); return; }
+    var list = playbooksOf(S.month);
+    if (!list.length) {
+      box.innerHTML = '<div class="pb-head"><div class="pb-kick">' + esc(mLabel(S.month)) + ' 업무 흐름</div>' +
+        '<h1>이 달의 플레이북이 아직 없습니다</h1><p class="pb-sum">' + esc(mLabel(S.month)) + ' 자료가 아직 없거나 데이터 양식이 예전 것입니다 — 위의 <b>동기화</b>를 눌러 새 데이터를 받아 주세요.</p></div>';
+      return;
+    }
+    var head = '<div class="pb-head" style="padding-bottom:0"><div class="pb-top"><div class="pb-kick">' +
+      esc(mLabel(S.month)) + ' 업무 흐름 · ' +
+      (S.year === 'all' ? '2025+2026' : S.year + '년') + '</div></div>' +
+      '<h1><small>' + (list.length > 1 ? '두 해를 겹쳐 봅니다 · 연도 탭으로 한 해만 볼 수 있습니다' : '') + '</small>' +
+      esc(mLabel(S.month)) + '에 할 일</h1></div>';
+    box.innerHTML = head + list.map(function (o, i) { return pbSection(o, i, folded); }).join('');
   }
 
   function yearHtml(folded) {
-    var items = MONTHS.map(function (m) {
-      var pb = (DATA.monthlyPlaybooks || {})[m];
-      if (!pb) return '';
-      var n = CARDS.filter(function (c) { return c.a.m === m; }).length;
-      return '<li><button class="ym" type="button" data-m="' + m + '">' +
-        '<b>' + (+m.slice(5)) + '월<em>' + n + '장</em></b>' +
-        '<span class="yt">' + esc(pb.label) + '</span>' +
-        '<span class="yd">' + esc(cut(pb.summary, 62)) + '</span>' +
-        '<span class="yb"><span class="ytag">흐름 ' + pb.steps.length + '단계</span>' +
-        '<span class="ytag">지뢰 ' + pb.pitfalls.length + '</span></span></button></li>';
-    }).join('');
-    if (!items) {
-      return '<div class="pb-head"><div class="pb-kick">2026 한 해 업무 흐름</div>' +
+    var blocks = [];
+    var yl = S.year === 'all' ? YEARS : [S.year];
+    yl.forEach(function (y) {
+      var items = MONTHS.map(function (m) {
+        var pb = (DATA.monthlyPlaybooks || {})[y + '-' + m];
+        if (!pb) return '';
+        var n = cardCountMonthYear(m, y);
+        return '<li><button class="ym" type="button" data-m="' + m + '">' +
+          '<b>' + (+m) + '월<em>' + n + '장</em></b>' +
+          '<span class="yt">' + esc(pb.label) + '</span>' +
+          '<span class="yd">' + esc(cut(pb.summary, 62)) + '</span>' +
+          '<span class="yb"><span class="ytag">흐름 ' + pb.steps.length + '단계</span>' +
+          '<span class="ytag">지뢰 ' + pb.pitfalls.length + '</span></span></button></li>';
+      }).join('');
+      if (!items) return;
+      blocks.push('<div class="pb-sec"><div class="pb-yhead"><b>' + y + '년</b><span class="yline"></span>' +
+        '<em>' + (+MONTHS[0]) + '월부터 ' + (+MONTHS[MONTHS.length - 1]) + '월까지</em></div>' +
+        '<ol class="yearflow">' + items + '</ol></div>');
+    });
+    if (!blocks.length) {
+      return '<div class="pb-head"><div class="pb-kick">한 해 업무 흐름</div>' +
         '<h1>플레이북 데이터를 기다리는 중입니다</h1><p class="pb-sum">데이터 양식이 예전 것입니다 — 위의 <b>동기화</b>를 눌러 새 플레이북 데이터를 받아 주세요.</p></div>';
     }
     var s = DATA.source || {};
-    return '<div class="pb-head"><div class="pb-top"><div class="pb-kick">2026 한 해 업무 흐름</div>' + foldBtn(folded) + '</div>' +
-      '<h1><small>1월부터 10월까지</small>달을 고르면 그 달의 순서와 지뢰가 먼저 보입니다</h1>' +
+    return '<div class="pb-head"><div class="pb-top"><div class="pb-kick">' +
+      (S.year === 'all' ? '2025+2026 한 해 업무 흐름' : S.year + ' 한 해 업무 흐름') + '</div>' + foldBtn(folded) + '</div>' +
+      '<h1><small>달을 고르면 그 달의 순서와 지뢰가 먼저 보입니다</small>' +
+      (S.year === 'all' ? '두 해를 나눠서, 달마다 겹쳐 봅니다' : S.year + '년 한 해') + '</h1>' +
       '<p class="pb-sum">본문 ' + num(s.articles) + '건 · 댓글 ' + num(s.comments) + '건에서 뽑은 대표 카드 ' +
       num(CARDS.length) + '장을 경중(🔴 사고주의 / 🟡 예외주의 / 🟢 단순팁)으로 나눴습니다. ' +
-      '아래 10개 월 카드를 누르면 그 달의 업무 순서와 지뢰부터 보여 줍니다.</p></div>' +
-      '<ol class="yearflow">' + items + '</ol>';
+      '아래 월 카드를 누르면 그 달의 업무 순서와 지뢰부터 보여 줍니다.</p></div>' +
+      blocks.join('');
   }
 
   function renderFooter() {
-    var s = DATA.source || {};
+    var s = DATA.source || {}, by = s.by_year || {};
+    var part = YEARS.map(function (y) {
+      var b = by[y] || {};
+      return y + '년 본문 ' + num(b.articles) + '건/댓글 ' + num(b.comments) + '건';
+    }).join(' · ');
     $('#ftr').innerHTML = 'Y공작소 아카이브 · 본문 ' + num(s.articles) + '건 / 댓글 ' + num(s.comments) +
       '건 · 대표 카드 ' + num(CARDS.length) + '장 · 데이터 기준 ' + esc(DATA.built_at || '') +
+      '<br>' + part +
       '<br>이 앱(GitHub Pages)에는 데이터가 없고, 내 구글 드라이브의 비공개 파일에서 이 기기로만 받아 옵니다. ' +
       '카드 제목·1줄 결론·지뢰 표시는 원문 글·댓글을 근거로 정리한 것이고, 메뉴 경로와 공식 표시(매뉴얼 p.)는 ' +
       '2026학년도 경기도 초등학교용 나이스 교무업무 매뉴얼에서 확인된 것만 넣었습니다. 확인되지 않은 사안은 예외로 표시했습니다.';
   }
 
   /* ── 필터 계산 ────────────────────────────────────────── */
-  function inMonth(c) { return S.month === 'all' || c.a.m === S.month; }
+  function inMonth(c) { return S.month === 'all' || monOf(c.a) === S.month; }
+  function yearOk(c) { return S.year === 'all' || String(c.y) === String(S.year); }
   function hay(a) {
     var v = HAY.get(a.i);
     if (v) return v;
     var m = CMETA[a.i];
-    v = (a.t + ' ' + (m ? (m.t || '') + ' ' + (m.ch || '') + ' ' + (m.mp || '') + ' ' + (m.one || '') : '') + ' ' +
+    v = (a.t + ' ' + yrOf(a) + ' ' + (m ? (m.t || '') + ' ' + (m.ch || '') + ' ' + (m.mp || '') + ' ' + (m.one || '') : '') + ' ' +
       (a.bd || '') + ' ' + (a.x || '') + ' ' + (a.b || '') + ' ' + (a.p || '') + ' ' +
       (a.cm || []).map(function (c) { return c.c; }).join(' ')).toLowerCase();
     HAY.set(a.i, v); return v;
@@ -327,7 +442,7 @@
   }
   function deckBase() {
     return CARDS.filter(function (c) {
-      return inMonth(c) && (!S.topic || c.topic === S.topic) && (!S.ms || c.a.s);
+      return inMonth(c) && yearOk(c) && (!S.topic || c.topic === S.topic) && (!S.ms || c.a.s);
     });
   }
 
@@ -370,7 +485,6 @@
   }
 
   function cardSrcHtml(a) {
-    var m = CMETA[a.i] || {};
     var src = '';
     src += '<div class="otitle"><b>원문 제목</b>' + esc(a.t) + '</div>';
     if (a.x) src += '<div class="note"><b>정리</b>' + esc(a.x) + '</div>';
@@ -389,9 +503,10 @@
 
   function cardHtml(c) {
     var a = c.a, m = c.m;
-    var tags = '<span class="sev sev-' + m.sv + '">' + SEVLBL[m.sv] + '</span>' +
+    var tags = yrBadge(c.y) +
+      '<span class="sev sev-' + m.sv + '">' + SEVLBL[m.sv] + '</span>' +
       '<span class="tg role">' + ROLLBL[m.r] + '</span>' +
-      '<span class="tg topic" title="' + esc(c.topic) + '">' + esc(cut(c.topic, 16)) + '</span>' +
+      '<span class="tg topic" title="' + esc(c.topic) + '">' + esc(cut(c.topic, 14)) + '</span>' +
       (m.g === 'gyeonggi' ? '<span class="tg reg-g">경기</span>' : '');
     var mp = m.mp ? '<div class="mp"><span class="mpk">메뉴</span>' + esc(pathText(m.mp)) +
       (m.mpp ? '<span class="mpp">매뉴얼 p.' + m.mpp + '</span>' : '') + '</div>' : '';
@@ -402,7 +517,7 @@
       mp +
       (m.mn ? '<p class="mn"><b>공식</b>' + esc(m.mn) + '</p>' : '') +
       (m.ex ? '<p class="ex"><b>예외</b>' + esc(m.ex) + '</p>' : '') +
-      '<div class="cmeta"><span>' + esc(mLabel(a.m)) + ' ' + esc(String(a.d).slice(0, 10)) + '</span><span class="dot"></span>' +
+      '<div class="cmeta"><span>' + esc(dLabel(a)) + '</span><span class="dot"></span>' +
       '<span>' + esc(a.b) + '</span><span class="dot"></span>' +
       '<span>댓글 ' + num(a.n) + '</span>' + (a.l ? '<span class="dot"></span><span>♥ ' + num(a.l) + '</span>' : '') +
       (a.s ? '<span class="dot"></span><span class="ms">맑은샘 답변</span>' : '') + '</div>' +
@@ -424,29 +539,45 @@
     if (searching) { renderSearch(q); return; }
     var list = visibleCards();
     $('#cards').innerHTML = list.length ? list.map(cardHtml).join('') :
-      '<div class="empty">이 조건에 맞는 카드가 없습니다. 필터를 풀어 보세요.</div>';
-    var monthArts = S.month === 'all' ? DATA.articles.length :
-      DATA.articles.filter(function (a) { return a.m === S.month; }).length;
+      '<div class="empty">이 조건에 맞는 카드가 없습니다. 연도·필터를 풀어 보세요.</div>';
+    var monthArts = 0, monthCmts = 0;
+    if (S.month === 'all') {
+      DATA.articles.forEach(function (a) {
+        if (S.year === 'all' || yrOf(a) === String(S.year)) { monthArts++; monthCmts += a.n || 0; }
+      });
+    } else {
+      YEARS.forEach(function (y) {
+        if (S.year === 'all' || S.year === String(y)) {
+          var st = statOf(y + '-' + S.month); monthArts += st.a; monthCmts += st.c;
+        }
+      });
+    }
+    var ytxt = S.year === 'all' ? '' : S.year + '년 ';
     $('#countTxt').innerHTML = '카드 <b>' + num(list.length) + '</b>장' +
-      (S.month === 'all' ? ' · 전체 ' + num(monthArts) + '건' : ' · ' + esc(mLabel(S.month)) + ' 글 ' + num(monthArts) + '건');
+      (S.month === 'all' ? ' · ' + ytxt + '전체 ' + num(monthArts) + '건' : ' · ' + ytxt + esc(mLabel(S.month)) + ' 글 ' + num(monthArts) + '건');
     barState('카드 ' + num(list.length) + '장');
     window.__naState = {
       articles: DATA.articles.length, cards: CARDS.length, rendered: list.length,
-      topics: (DATA.topics || []).length, built: DATA.built_at, month: S.month, mode: 'deck'
+      topics: (DATA.topics || []).length, built: DATA.built_at, month: S.month, year: S.year,
+      mode: 'deck', months: MONTHS.length, years: YEARS
     };
   }
 
   /* ── 검색 결과 ─────────────────────────────────────────── */
   var searchLimit = 40, searchHits = [];
   function renderSearch(q) {
-    searchHits = DATA.articles.filter(function (a) { return hay(a).indexOf(q) >= 0; })
-      .sort(function (x, y) {
-        var cx = CMETA[x.i] ? 2 : 0, cy = CMETA[y.i] ? 2 : 0;
-        return (cy - cx) || (y.n - x.n) || (y.i - x.i);
-      });
+    searchHits = DATA.articles.filter(function (a) {
+      if (S.month !== 'all' && monOf(a) !== S.month) return false;
+      if (S.year !== 'all' && yrOf(a) !== String(S.year)) return false;
+      return hay(a).indexOf(q) >= 0;
+    }).sort(function (x, y) {
+      var cx = CMETA[x.i] ? 2 : 0, cy = CMETA[y.i] ? 2 : 0;
+      return (cy - cx) || (y.n - x.n) || (y.i - x.i);
+    });
     var show = searchHits.slice(0, searchLimit);
     var h = ['<div class="shead"><h2>“' + esc(S.q.trim()) + '” 검색 결과</h2>' +
-      '<span class="n">' + num(searchHits.length) + '건 · 카드 먼저, 댓글 많은 순</span></div>'];
+      '<span class="n">' + num(searchHits.length) + '건 · ' + (S.month === 'all' ? '두 해 전체' : esc(mLabel(S.month))) +
+      (S.year === 'all' ? '' : ' · ' + S.year + '년') + ' · 카드 먼저, 댓글 많은 순</span></div>'];
     if (!searchHits.length) {
       h.push('<div class="empty">찾는 내용이 없습니다. 짧은 낱말로 다시 검색해 보세요 (예: 반변경, 생기부, 권한).</div>');
     } else {
@@ -461,14 +592,15 @@
     barState('검색 ' + num(searchHits.length) + '건');
     window.__naState = {
       articles: DATA.articles.length, cards: CARDS.length, topics: (DATA.topics || []).length,
-      built: DATA.built_at, month: S.month, mode: 'search', hits: searchHits.length
+      built: DATA.built_at, month: S.month, year: S.year, mode: 'search', hits: searchHits.length
     };
   }
 
   /* ── 원문 글 목록 ──────────────────────────────────────── */
   function rowsOfMonth() {
-    return DATA.articles.filter(function (a) { return S.month === 'all' || a.m === S.month; })
-      .sort(function (x, y) { return (y.n - x.n) || (y.i - x.i); });
+    return DATA.articles.filter(function (a) {
+      return (S.month === 'all' || monOf(a) === S.month) && (S.year === 'all' || yrOf(a) === String(S.year));
+    }).sort(function (x, y) { return (y.n - x.n) || (y.i - x.i); });
   }
 
   function rowHtml(a) {
@@ -476,7 +608,7 @@
     var preview = meta ? meta.one : (a.x || (a.bc && a.bc.c));
     var note = preview ? '<span class="rn' + (meta ? ' rn-one' : '') + '">' + esc(cut(preview, 150)) + '</span>' : '';
     return '<details class="row" data-id="' + a.i + '">' +
-      '<summary><span class="rd">' + esc(mLabel(a.m)) + ' ' + esc(String(a.d).slice(8, 10)) + '일</span>' +
+      '<summary><span class="rd">' + esc(dLabel(a)) + '</span>' +
       '<span class="rt"><span class="rb">' + esc(cut(a.p || a.b, 16)) + '</span> ' + esc(meta ? (meta.t || a.t) : a.t) + note + '</span>' +
       '<span class="rm">' + (a.s ? '<span class="ms">맑은샘</span>' : '') +
       (a.pa ? '<span class="pt" title="첫 10개 댓글만 보관">일부</span>' : '') +
@@ -489,19 +621,24 @@
     if (!box) return;
     if (S.month === 'all') {
       var per = Object.create(null);
-      DATA.articles.forEach(function (a) { per[a.m] = (per[a.m] || 0) + 1; });
+      DATA.articles.forEach(function (a) {
+        if (S.year !== 'all' && yrOf(a) !== String(S.year)) return;
+        per[monOf(a)] = (per[monOf(a)] || 0) + 1;
+      });
       box.innerHTML = '<details class="fold"><summary><h2>월별 원문 글</h2>' +
-        '<span class="n">전체 ' + num(DATA.articles.length) + '건 · 월을 고르면 그 달 글 목록이 열립니다</span></summary>' +
+        '<span class="n">' + (S.year === 'all' ? '두 해' : S.year + '년') + ' ' +
+        num(Object.keys(per).reduce(function (s, k) { return s + per[k]; }, 0)) +
+        '건 · 월을 고르면 그 달 글 목록이 열립니다</span></summary>' +
         '<div class="foldbody"><div class="chips" style="padding:10px 0">' +
         MONTHS.map(function (m) {
-          return '<button class="chip" type="button" data-m="' + m + '">' + (+m.slice(5)) + '월<span class="n">' +
+          return '<button class="chip" type="button" data-m="' + m + '">' + (+m) + '월<span class="n">' +
             num(per[m] || 0) + '</span></button>';
         }).join('') + '</div></div></details>';
       return;
     }
     var rows = rowsOfMonth();
     box.innerHTML = '<details class="fold"><summary><h2>' + esc(mLabel(S.month)) + ' 원문 글 전체</h2>' +
-      '<span class="n">' + num(rows.length) + '건 · 댓글 ' +
+      '<span class="n">' + (S.year === 'all' ? '두 해 ' : S.year + '년 ') + num(rows.length) + '건 · 댓글 ' +
       num(rows.reduce(function (s, a) { return s + (a.n || 0); }, 0)) + '개</span></summary>' +
       '<div class="foldbody">' + rows.map(rowHtml).join('') + '</div></details>';
   }
@@ -509,7 +646,7 @@
   function detailHtml(a) {
     var h = ['<div class="detail">'];
     var m = CMETA[a.i];
-    h.push('<div class="otitle"><b>원문 제목</b>' + esc(a.t) + '</div>');
+    h.push('<div class="otitle"><b>원문 제목 · ' + esc(yrOf(a)) + '</b>' + esc(a.t) + '</div>');
     if (m) h.push('<div class="onetag">' + SEVLBL[m.sv] + ' · ' + esc(m.one) + '</div>');
     if (a.x) h.push('<div class="note"><b>정리</b>' + esc(a.x) + '</div>');
     if (a.bd) h.push('<div class="note"><b>원문 글</b><div class="qbody" style="max-height:none">' + esc(a.bd) + '</div></div>');
@@ -532,13 +669,17 @@
     var box = $('#topicsBox');
     if (!box) return;
     var items = (DATA.topics || []).map(function (t) {
-      var n = CARDS.filter(function (c) { return c.topic === t.n; }).length;
+      var mine = CARDS.filter(function (c) { return c.topic === t.n; });
+      var n = mine.length;
       var bySev = { critical: 0, caution: 0, tip: 0 };
-      CARDS.forEach(function (c) { if (c.topic === t.n) bySev[c.m.sv]++; });
+      mine.forEach(function (c) { bySev[c.m.sv]++; });
+      var ycnt = {};
+      mine.forEach(function (c) { ycnt[c.y] = (ycnt[c.y] || 0) + 1; });
+      var ytxt = YEARS.filter(function (y) { return ycnt[y]; }).map(function (y) { return y + ' ' + ycnt[y]; }).join(' · ');
       return '<details class="topic"><summary>' +
         '<span class="dotc" style="background:' + esc(t.c) + '"></span>' +
         '<span>' + esc(t.n) + '</span>' +
-        '<span class="tn">카드 ' + n + ' · 🔴' + bySev.critical + ' 🟡' + bySev.caution + ' 🟢' + bySev.tip + '</span>' +
+        '<span class="tn">카드 ' + n + (ytxt ? ' (' + ytxt + ')' : '') + ' · 🔴' + bySev.critical + ' 🟡' + bySev.caution + ' 🟢' + bySev.tip + '</span>' +
         '</summary><div class="topicbody">' +
         '<p class="lead">' + esc(t.lead || '') + '</p>' +
         (t.points && t.points.length ? '<ul>' + t.points.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' : '') +
@@ -561,7 +702,6 @@
     barState(null, kind);
   }
 
-  /* 모바일 상단바에서는 상태 문구를 숨기므로, 고정 바 안에 짧게 같이 보여 준다. */
   function barState(count, kind) {
     var el = $('#barState');
     if (!el) return;
@@ -575,6 +715,7 @@
 
   /* ── 전체 렌더 ────────────────────────────────────────── */
   function renderAll() {
+    renderYears();
     renderMonths();
     renderPlaybook();
     renderRows();
@@ -589,6 +730,7 @@
   function setMonth(m, scroll) {
     S.month = m;
     S.topic = '';
+    if (S.year !== 'all' && m !== 'all' && !yearAvail(S.year)) S.year = 'all';
     renderAll();
     if (scroll) {
       var top = $('#playbook').getBoundingClientRect().top + window.pageYOffset - barPad();
@@ -596,9 +738,18 @@
     }
   }
 
+  function setYear(y) {
+    S.year = String(y);
+    lsSet(LS_YEAR, S.year);
+    if (S.month !== 'all' && S.year !== 'all' && !yearAvail(S.year)) { S.year = 'all'; lsSet(LS_YEAR, ''); }
+    renderAll();
+    var top = $('#playbook').getBoundingClientRect().top + window.pageYOffset - barPad();
+    window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }
+
   function jumpToCard(id) {
     var a = BYID[id]; if (!a) return;
-    S.month = a.m; S.sev = 'all'; S.role = 'all'; S.ms = false; S.topic = ''; S.q = '';
+    S.month = monOf(a); S.year = yrOf(a); S.sev = 'all'; S.role = 'all'; S.ms = false; S.topic = ''; S.q = '';
     var qi = $('#q'); if (qi) qi.value = '';
     renderAll();
     var el = $('#cards .card[data-id="' + id + '"]');
@@ -633,7 +784,7 @@
         refreshDlgInfo();
         return true;
       }
-      if (!opts.silent) setState('내려받는 중…');
+      if (!opts.silent) setState('내려받는 중… (두 해 자료)');
       return bridgeGet().then(function (r) {
         return saveArchive(r.payload, 'drive', { driveUpdated: r.updated, driveSize: r.size }).then(function () {
           lsSet(LS_SYNC, String(Date.now()));
@@ -678,8 +829,15 @@
     try {
       var lines = [];
       if (DATA) {
-        lines.push('지금 담긴 데이터 · ' + (DATA.title || '') + ' / 글 ' + num(DATA.source.articles) + '건 · 댓글 ' + num(DATA.source.comments) + '건');
+        var s = DATA.source || {};
+        lines.push('지금 담긴 데이터 · ' + (DATA.title || '') + ' / 글 ' + num(s.articles) + '건 · 댓글 ' + num(s.comments) + '건');
         lines.push('양식 · schema ' + (DATA.schema || 1) + ' · 카드 ' + num(CARDS.length) + '장 · 월별 플레이북 ' + Object.keys(DATA.monthlyPlaybooks || {}).length + '개');
+        if (s.by_year) {
+          lines.push('연도 · ' + YEARS.map(function (y) {
+            var b = s.by_year[y] || {};
+            return y + ' 글 ' + num(b.articles) + '건/카드 ' + num(b.cards) + '장';
+          }).join(' · '));
+        }
         lines.push('데이터 기준 · ' + (DATA.built_at || '-') + (lastMeta && lastMeta.source === 'file' ? ' (내 JSON 파일)' : ' (드라이브)'));
       } else {
         lines.push('아직 담긴 데이터가 없습니다.');
@@ -758,14 +916,17 @@
         $('#content').hidden = true;
         $('#setupPanel').hidden = false;
         $('#mstrip').innerHTML = '';
+        var ys = $('#yrseg'); if (ys) ys.innerHTML = '';
         setState('데이터 없음');
         refreshDlgInfo();
         toast('이 기기의 데이터를 지웠습니다');
       });
     });
 
-    // 월 선택 (스트립 · 연간 카드 · 월별 글 칩)
+    // 월·연도 선택 · 필터 · 카드 이동
     document.addEventListener('click', function (e) {
+      var yb = e.target.closest('#yrseg .yrbtn');
+      if (yb && !yb.disabled) { setYear(yb.dataset.y); return; }
       var mb = e.target.closest('[data-m]');
       if (mb && !e.target.closest('.row')) { setMonth(mb.dataset.m, true); return; }
       var jp = e.target.closest('[data-jump]');
@@ -860,7 +1021,7 @@
       window.addEventListener('load', function () {
         /* 주소의 ?v= 를 바꾸면 새 워커로 갈아탄다(HTTP 캐시에 옛 sw.js 가 남아도 확실히).
            릴리스할 때마다 sw.js 의 VERSION 과 이 값을 함께 올린다. */
-        navigator.serviceWorker.register('sw.js?v=8').catch(function () { });
+        navigator.serviceWorker.register('sw.js?v=9').catch(function () { });
       });
     }
     var cached = memRec;

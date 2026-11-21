@@ -459,3 +459,35 @@ dialog#dlg::backdrop{background:rgba(14,20,30,.42);backdrop-filter:blur(2px)}
 @media (prefers-reduced-motion:reduce){
   *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
+
+/* ── v9: 연도 전환 탭 · 연도 배지 ───────────────────────────── */
+.yrseg{display:flex;gap:4px;align-items:center;padding:2px;background:var(--bg-2);border:1px solid var(--line);border-radius:11px;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;margin-bottom:1px}
+.yrseg::-webkit-scrollbar{display:none}
+.yrbtn{
+  border:none;background:transparent;border-radius:8px;padding:6px 11px;cursor:pointer;
+  font-size:12.5px;font-weight:750;color:#5b6472;white-space:nowrap;letter-spacing:-.01em;
+  display:inline-flex;align-items:center;gap:5px;
+}
+.yrbtn .n{font-size:10.5px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+.yrbtn:hover{background:#fff}
+.yrbtn.on{background:#fff;color:var(--brand);box-shadow:0 1px 4px -2px rgba(20,30,50,.35)}
+.yrbtn.on .n{color:var(--brand)}
+.yrbtn:disabled{opacity:.4;cursor:default}
+.yrbtn:disabled:hover{background:transparent}
+.tg.yr{background:#eef2fd;color:#1d4ed8;font-weight:800;letter-spacing:.02em}
+.tg.yr.y25{background:#fbf3e6;color:#8a5a12}
+/* 한 달에 두 해 플레이북을 이어 붙일 때 */
+.pb-sec{border-top:1px solid var(--line)}
+.pb-sec:first-child{border-top:none}
+.pb-sec .pb-head{padding-top:16px}
+.pb-yhead{display:flex;align-items:center;gap:8px;padding:14px 24px 0}
+.pb-yhead b{font-size:13px;font-weight:800;color:var(--brand)}
+.pb-yhead .yline{flex:1;height:1px;background:var(--line)}
+.pb-yhead em{font-style:normal;font-size:11.5px;color:var(--muted);font-weight:650}
+.pb.folded .pb-sec .flow,.pb.folded .pb-sec .mines{display:none}
+@media(max-width:560px){
+  .pb-head{padding:16px 16px 4px}
+  .pb-yhead{padding:12px 16px 0}
+  .flow{padding:14px 16px 4px}
+  .mines{margin:14px 16px 18px}
+}
