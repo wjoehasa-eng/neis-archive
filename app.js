@@ -7,6 +7,8 @@
  *
  * v9: 한 달 안에서 [종합(25+26) | 2026년 | 2025년] 을 전환해 본다.
  *     카드·플레이북에 연도 배지를 붙여 출처 연도를 구분한다.
+ * v10: 2025년을 카페 실제 게시량에 따른 경중으로 다시 뽑은 1,922건으로 맞추고
+ *      카드 밀도(2·3·12월 집중)와 그 달 플레이북을 함께 갱신했다. 화면 코드는 v9과 같다.
  */
 (function () {
   'use strict';
@@ -26,7 +28,7 @@
   var lastMeta = null, syncing = false;
 
   window.__naErrors = [];
-  window.__naVersion = '2026-11-21.9';
+  window.__naVersion = '2026-11-24.1';
   window.addEventListener('error', function (e) { window.__naErrors.push(String((e && e.message) || e)); });
   window.addEventListener('unhandledrejection', function (e) {
     var r = e && e.reason; window.__naErrors.push('promise: ' + String((r && r.message) || r));
@@ -1019,7 +1021,7 @@
       window.addEventListener('load', function () {
         /* 주소의 ?v= 를 바꾸면 새 워커로 갈아탄다(HTTP 캐시에 옛 sw.js 가 남아도 확실히).
            릴리스할 때마다 sw.js 의 VERSION 과 이 값을 함께 올린다. */
-        navigator.serviceWorker.register('sw.js?v=9').catch(function () { });
+        navigator.serviceWorker.register('sw.js?v=10').catch(function () { });
       });
     }
     var cached = memRec;

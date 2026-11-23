@@ -5,12 +5,12 @@
  * (HTML만 새로 받고 JS/CSS는 옛 캐시로 쓰면 화면이 깨지기 때문 — 버전을 올려도
  *  새 워커가 활성화되기 전 첫 방문에서 그런 어긋남이 생긴다.)
  */
-var VERSION = 'neis-archive-2026-11-21.9';
+var VERSION = 'neis-archive-2026-11-24.1';
 var SHELL = [
   './',
   './index.html',
-  './styles.css?v=9',
-  './app.js?v=9',
+  './styles.css?v=10',
+  './app.js?v=10',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
