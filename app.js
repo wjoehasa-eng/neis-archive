@@ -113,6 +113,46 @@
   function bridgeUrl() { return lsGet(LS_URL).trim(); }
   function bridgeKey() { return lsGet(LS_KEY).trim(); }
 
+  /* ── #s= 자동 연결(공용 PC에서도 주소 한 줄로 다시 연결) ── */
+  function b64e(s) {
+    try {
+      return btoa(unescape(encodeURIComponent(String(s == null ? '' : s))))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    } catch (e) { return ''; }
+  }
+  function b64d(s) {
+    try {
+      var t = String(s || '').replace(/-/g, '+').replace(/_/g, '/');
+      while (t.length % 4) t += '=';
+      return decodeURIComponent(escape(atob(t)));
+    } catch (e) { return ''; }
+  }
+  function readHashParam(name) {
+    var m = String(location.hash || '').match(new RegExp('[#&]' + name + '=([^&]+)'));
+    if (!m) return '';
+    var raw = '';
+    try { raw = decodeURIComponent(m[1]); } catch (e) { raw = m[1]; }
+    var v = b64d(raw);
+    if (!/^https?:\/\//i.test(v) && /^https?:\/\//i.test(raw)) v = raw;
+    return /^https?:\/\//i.test(v) ? v : '';
+  }
+  function pageLink() {
+    var u = bridgeUrl();
+    if (!u) return '';
+    var link = location.origin + location.pathname + '#s=' + b64e(u);
+    var k = bridgeKey();
+    if (k) link += '&k=' + b64e(k);
+    return link;
+  }
+  function copyPageLink() {
+    var link = pageLink();
+    if (!link) { toast('연결 주소를 먼저 넣어 주세요', true); openDlg(); return; }
+    function done() { toast('이 페이지 링크를 복사했어요 · 즐겨찾기에 넣어 두면 공용 PC에서도 한 번에 연결됩니다'); }
+    function fallback() { try { window.prompt('아래 링크를 복사하세요', link); } catch (e) { /* noop */ } }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, fallback);
+    else fallback();
+  }
+
   /* ── 데이터 받기 ──────────────────────────────────────── */
   function callBridge(body, timeoutMs) {
     var url = bridgeUrl();
@@ -908,6 +948,7 @@
         toast('연결 실패 · ' + ((e && e.message) || ''), true);
       });
     });
+    $('#dlgCopyLink').addEventListener('click', copyPageLink);
     $('#dlgWipe').addEventListener('click', function () {
       if (!window.confirm('이 기기에 담긴 데이터를 지울까요? (드라이브 원본은 그대로)')) return;
       memRec = null;
@@ -1016,12 +1057,20 @@
 
   /* ── 시작 ────────────────────────────────────────────── */
   function boot() {
+    /* #s= 링크로 열렸으면 주소(와 키)를 저장하고 해시는 지운 뒤 바로 동기화한다. */
+    var hashUrl = readHashParam('s');
+    if (hashUrl) {
+      lsSet(LS_URL, hashUrl);
+      var hashKey = readHashParam('k');
+      if (hashKey) lsSet(LS_KEY, hashKey);
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* noop */ }
+    }
     bind();
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
         /* 주소의 ?v= 를 바꾸면 새 워커로 갈아탄다(HTTP 캐시에 옛 sw.js 가 남아도 확실히).
            릴리스할 때마다 sw.js 의 VERSION 과 이 값을 함께 올린다. */
-        navigator.serviceWorker.register('sw.js?v=10').catch(function () { });
+        navigator.serviceWorker.register('sw.js?v=11').catch(function () { });
       });
     }
     var cached = memRec;
