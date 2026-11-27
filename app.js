@@ -808,6 +808,7 @@
     var url = bridgeUrl();
     if (!url) {
       if (!opts.silent) { toast('먼저 연결 주소를 넣어 주세요', true); openDlg(); }
+      if (window.LoadGate) LoadGate.done();
       return Promise.resolve(false);
     }
     if (syncing) return Promise.resolve(false);
@@ -841,14 +842,17 @@
       refreshDlgInfo();
       return false;
     }).then(function (v) {
-      syncing = false; $('#btnSync').disabled = false; return v;
+      syncing = false; $('#btnSync').disabled = false;
+      if (window.LoadGate) LoadGate.done();
+      return v;
     });
   }
 
   function autoSync() {
-    if (!bridgeUrl()) return;
+    if (!bridgeUrl()) { if (window.LoadGate) LoadGate.done(); return; }
     var last = +(lsGet(LS_SYNC) || 0);
     if (!last || Date.now() - last > AUTO_MS) sync({ silent: true });
+    else if (window.LoadGate) LoadGate.done();
   }
 
   /* ── 설정 대화상자 ───────────────────────────────────── */
@@ -949,6 +953,19 @@
       });
     });
     $('#dlgCopyLink').addEventListener('click', copyPageLink);
+    /* 지금 담긴 아카이브를 표준 JSON 파일로 백업 (다른 기기·브라우저에서 「JSON 파일 열기」로 그대로 복원) */
+    $('#dlgExport').addEventListener('click', function () {
+      if (!DATA) { toast('내려받을 데이터가 없어요', true); return; }
+      var d = new Date();
+      var name = 'y-archive-' + d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2) + '.json';
+      var s = JSON.stringify(DATA, null, 1);
+      var blob = new Blob([s], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 800);
+      toast('지금 데이터(' + num(DATA.articles.length) + '건)를 JSON 파일로 저장했어요 · 「JSON 파일 열기」로 복원할 수 있습니다');
+    });
     $('#dlgWipe').addEventListener('click', function () {
       if (!window.confirm('이 기기에 담긴 데이터를 지울까요? (드라이브 원본은 그대로)')) return;
       memRec = null;
@@ -1070,7 +1087,7 @@
       window.addEventListener('load', function () {
         /* 주소의 ?v= 를 바꾸면 새 워커로 갈아탄다(HTTP 캐시에 옛 sw.js 가 남아도 확실히).
            릴리스할 때마다 sw.js 의 VERSION 과 이 값을 함께 올린다. */
-        navigator.serviceWorker.register('sw.js?v=11').catch(function () { });
+        navigator.serviceWorker.register('sw.js?v=12').catch(function () { });
       });
     }
     var cached = memRec;
@@ -1080,11 +1097,13 @@
       if (rec && rec.json) {
         try { applyData(JSON.parse(rec.json), rec); } catch (e) { /* 손상된 캐시는 무시 */ }
       }
+      if (DATA && window.LoadGate) LoadGate.done();   /* 이 기기에 담긴 자료가 있으면 바로 보여 준다 */
       if (!DATA) {
         $('#setupPanel').hidden = false;
         $('#content').hidden = true;
         setState(bridgeUrl() ? '연결됨 · 아직 받은 데이터 없음' : '데이터 없음');
       }
+      if (!bridgeUrl() && window.LoadGate) LoadGate.done();
       autoSync();
       refreshDlgInfo();
     });
